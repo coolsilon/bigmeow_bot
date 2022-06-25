@@ -6,6 +6,9 @@ authors = ["Your Name <you@example.com>"]
 
 [tool.poetry.dependencies]
 python = "^3.10"
+"discord.py" = "^1.7.3"
+python-dotenv = "^0.20.0"
+python-telegram-bot = {version = "20.0a0", allow-prereleases = true}
 
 [tool.poetry.dev-dependencies]
 pytest = "^5.2"
