@@ -2,18 +2,96 @@ import asyncio
 import logging
 import os
 
+import dateparser
+import discord
+import lxml.html
+import requests
 from dotenv import load_dotenv
+from lxml.cssselect import CSSSelector
+from lxml.etree import tostring
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 logger = logging.getLogger(__name__)
 
-
-async def discord_setup():
-    pass
+client = discord.Client()
 
 
-async def telegram_setup():
+def meowpetrol_fetch_date(result):
+    message = None
+
+    if result:
+        dates = result[0].text.split("-")
+
+        if dates[0].strip().isdigit():
+            dates[0] = "{}{}".format(
+                dates[0].strip(), " ".join(dates[1].strip().split(" ")[1:])
+            )
+
+        dates = map(dateparser.parse, dates)
+
+        message = "From {}".format(
+            " to ".join(map(lambda x: x.__format__("%d/%m/%Y"), dates))
+        )
+
+    return message
+
+
+def meowpetrol_fetch_price():
+    result = []
+    result.append(
+        "Request received, fetching and parsing data from https://hargapetrol.my/"
+    )
+
+    response = requests.get(
+        "https://hargapetrol.my/",
+        headers={
+            "User-Agent": os.environ.get(
+                "BOT_AGENT",
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.12; rv:58.0) Gecko/20100101 Firefox/58.0",
+            )
+        },
+    )
+
+    result.append(
+        meowpetrol_fetch_date(
+            CSSSelector("div.starter-template > p.lead b i")(
+                lxml.html.fromstring(response.text)
+            ),
+        )
+    )
+
+    for block in CSSSelector("div[itemprop=priceComponent]")(
+        lxml.html.fromstring(response.text)
+    )[:3]:
+        result.append(
+            "Price of {} is RM {} per litre ({} from last week)".format(
+                CSSSelector("div")(block)[1].text.strip(),
+                CSSSelector("span[itemprop=price]")(block)[0].text.strip(),
+                CSSSelector("div")(block)[3].text.replace(" ", ""),
+            )
+        )
+
+    return filter(lambda message: message is not None, result)
+
+
+@client.event
+async def on_message(message):
+    if message.author == client.user:
+        return
+
+    if message.content.startswith("!meowpetrol"):
+        messages = meowpetrol_fetch_price()
+
+        for text in messages:
+            await message.channel.send(text)
+
+
+@client.event
+async def on_ready():
+    """
+    Get telegram setup done here
+    """
     application = ApplicationBuilder().token(os.environ["TELEGRAM_TOKEN"]).build()
 
     application.add_handler(CommandHandler("meowpetrol", telegram_petrol))
@@ -30,17 +108,12 @@ async def telegram_setup():
 
 
 async def telegram_petrol(update: Update, context):
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id, text="I'm a bot, please talk to me!"
-    )
+    messages = meowpetrol_fetch_price()
 
-
-async def main():
-    load_dotenv()
-
-    asyncio.gather(discord_setup(), telegram_setup())
+    for text in messages:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=text)
 
 
 if __name__ == "__main__":
     load_dotenv()
-    asyncio.run(telegram_setup())
+    client.run(os.environ["DISCORD_TOKEN"])
