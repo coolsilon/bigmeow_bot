@@ -10,7 +10,9 @@ from lxml.cssselect import CSSSelector
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
+logging.basicConfig()
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 client = discord.Client()
 
