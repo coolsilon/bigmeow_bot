@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import os
 
@@ -8,7 +7,6 @@ import lxml.html
 import requests
 from dotenv import load_dotenv
 from lxml.cssselect import CSSSelector
-from lxml.etree import tostring
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
@@ -107,7 +105,7 @@ async def on_ready():
         queue.task_done()
 
 
-async def telegram_petrol(update: Update, context):
+async def telegram_petrol(update: Update, context: ContextTypes.DEFAULT_TYPE):
     messages = meowpetrol_fetch_price()
 
     for text in messages:
