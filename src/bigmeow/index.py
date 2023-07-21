@@ -14,7 +14,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 logger = logging.getLogger(__name__)
 
-client = discord.Client()
+dclient = discord.Client()
 
 
 def meowpetrol_fetch_date(result):
@@ -75,9 +75,9 @@ def meowpetrol_fetch_price():
     return filter(lambda message: message is not None, result)
 
 
-@client.event
+@dclient.event
 async def on_message(message):
-    if message.author == client.user:
+    if message.author == dclient.user:
         return
 
     if message.content.startswith("!meowpetrol"):
@@ -87,8 +87,19 @@ async def on_message(message):
             await message.channel.send(text)
 
 
-@client.event
+@dclient.event
 async def on_ready():
+    await telegram_setup()
+
+    queue = await application.updater.start_polling()
+
+    while True:
+        update = await queue.get()
+        logger.info("TG update=%s", update)
+        queue.task_done()
+
+
+async def telegram_setup():
     """
     Get telegram setup done here
     """
@@ -98,13 +109,6 @@ async def on_ready():
 
     await application.initialize()
     await application.start()
-
-    queue = await application.updater.start_polling()
-
-    while True:
-        update = await queue.get()
-        logger.info("TG update=%s", update)
-        queue.task_done()
 
 
 async def telegram_petrol(update: Update, context):
@@ -116,4 +120,4 @@ async def telegram_petrol(update: Update, context):
 
 if __name__ == "__main__":
     load_dotenv()
-    client.run(os.environ["DISCORD_TOKEN"])
+    dclient.run(os.environ["DISCORD_TOKEN"])
