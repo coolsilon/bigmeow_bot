@@ -8,16 +8,15 @@ authors = ["Your Name <you@example.com>"]
 python = "^3.10"
 "discord.py" = "^1.7.3"
 python-dotenv = "^0.20.0"
-python-telegram-bot = {version = "20.0a0", allow-prereleases = true}
 requests = "^2.28.0"
-lxml = "^4.9.0"
-cssselect = "^1.1.0"
-dateparser = "^1.1.1"
+structlog = "^24.2.0"
+python-telegram-bot = "^21.2"
 
-[tool.poetry.dev-dependencies]
-pytest = "^5.2"
-black = "^22.3.0"
-prospector = "^1.7.7"
+[tool.poetry.group.dev.dependencies]
+black = "^24.4.2"
+prospector = "^1.10.3"
+pytest = "^8.2.1"
+ipdb = "^0.13.13"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
