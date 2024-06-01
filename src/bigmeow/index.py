@@ -1,4 +1,6 @@
+import asyncio
 import csv
+import logging
 import os
 from datetime import date, timedelta
 from enum import Enum
@@ -15,6 +17,7 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import (
+    Application,
     ApplicationBuilder,
     CommandHandler,
     ContextTypes,
@@ -98,11 +101,18 @@ class MeowCommand(Enum):
         return f"{COMMAND_PREFIX}{self.value}"
 
 
+def discord_init_client() -> discord.Client:
+    intents = discord.Intents.default()
+    intents.messages = True
+    intents.message_content = True
+    return discord.Client(intents=discord.Intents(messages=True, message_content=True))
+
+
 CACHE_LIMIT = 5
 DATE_FORMAT = "%d/%m/%Y"
 
 logger = structlog.get_logger()
-client = discord.Client(intents=discord.Intents(messages=True, message_content=True))
+client = discord_init_client()
 cat_cache = Cat_Cache()
 fact_cache = Fact_Cache()
 latest_cache = Latest(Level(date.min, 0, 0, 0), Change(date.min, 0, 0, 0))
@@ -231,11 +241,7 @@ async def on_message(message) -> None:
         )
 
 
-@client.event
-async def on_ready() -> NoReturn:
-    """
-    Get telegram setup done here
-    """
+def telegram_init_application() -> Application:
     application = ApplicationBuilder().token(os.environ["TELEGRAM_TOKEN"]).build()
 
     application.add_handler(CommandHandler(MeowCommand.PETROL.value, telegram_petrol))
@@ -243,6 +249,10 @@ async def on_ready() -> NoReturn:
     application.add_handler(CommandHandler(MeowCommand.FACT.value, telegram_fact))
     application.add_handler(MessageHandler(filters.TEXT, telegram_meow))
 
+    return application
+
+
+async def telegram_run(application: Application) -> NoReturn:
     await application.initialize()
     await application.start()
 
@@ -251,7 +261,7 @@ async def on_ready() -> NoReturn:
 
         while True:
             update = await queue.get()
-            logger.info("TG", update=update)
+            logger.info(update=update)
             queue.task_done()
 
 async def telegram_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -316,4 +326,8 @@ async def telegram_meow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 if __name__ == "__main__":
     load_dotenv()
-    client.run(os.environ["DISCORD_TOKEN"])
+
+    loop = asyncio.get_event_loop()
+    loop.create_task(client.start(os.environ["DISCORD_TOKEN"]))
+    loop.create_task(telegram_run(telegram_init_application()))
+    loop.run_forever()

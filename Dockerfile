@@ -4,7 +4,7 @@ ENV PYTHONFAULTHANDLER=1 \
     PYTHONHASHSEED=random \
     PYTHONUNBUFFERED=1
 
-RUN apt-get update && apt-get install -y gcc libffi-dev g++
+RUN apt-get update && apt-get install -y libffi-dev libnacl-dev python3-dev
 WORKDIR /app
 
 FROM base as builder
