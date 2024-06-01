@@ -9,8 +9,10 @@ from typing import NamedTuple, NoReturn
 import discord
 import requests
 import structlog
+from cowsay import cowsay
 from dotenv import load_dotenv
 from telegram import Update
+from telegram.constants import ParseMode
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -136,6 +138,12 @@ def meow_fetch_photo() -> BytesIO:
     )
 
 
+def meow_say(message: str) -> str:
+    return "```\n{}\n```".format(
+        cowsay(message, cow=choice(["kitty", "hellokitty", "meow"]))
+    )
+
+
 @client.event
 async def on_message(message) -> None:
     if message.author == client.user:
@@ -148,7 +156,13 @@ async def on_message(message) -> None:
         for text in messages:
             await message.channel.send(text)
 
-    if "meow" in message.content.lower():
+    elif message.content.startswith("!meowsay"):
+        logger.info(message)
+        await message.channel.send(
+            meow_say(message.content.replace("!meowsay", "").strip())
+        )
+
+    elif "meow" in message.content.lower():
         logger.info(message)
         await message.channel.send(
             file=discord.File(meow_fetch_photo(), filename="meow.png")
@@ -163,6 +177,7 @@ async def on_ready() -> NoReturn:
     application = ApplicationBuilder().token(os.environ["TELEGRAM_TOKEN"]).build()
 
     application.add_handler(CommandHandler("meowpetrol", telegram_petrol))
+    application.add_handler(CommandHandler("meowsay", telegram_say))
     application.add_handler(MessageHandler(filters.TEXT, telegram_meow))
 
     await application.initialize()
@@ -182,6 +197,14 @@ async def telegram_petrol(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     for text in messages:
         await context.bot.send_message(chat_id=update.effective_chat.id, text=text)
+
+async def telegram_say(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.info(update)
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        parse_mode=ParseMode.MARKDOWN,
+        text=meow_say(update.message.text.replace("/meowsay", "").strip()),
+    )
 
 
 async def telegram_meow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

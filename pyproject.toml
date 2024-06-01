@@ -11,6 +11,7 @@ python-dotenv = "^0.20.0"
 requests = "^2.28.0"
 structlog = "^24.2.0"
 python-telegram-bot = "^21.2"
+python-cowsay = "^1.2.0"
 
 [tool.poetry.group.dev.dependencies]
 black = "^24.4.2"

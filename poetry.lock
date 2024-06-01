@@ -1168,6 +1168,17 @@ tomli = {version = ">=1", markers = "python_version < \"3.11\""}
 dev = ["argcomplete", "attrs (>=19.2)", "hypothesis (>=3.56)", "mock", "pygments (>=2.7.2)", "requests", "setuptools", "xmlschema"]
 
 [[package]]
+name = "python-cowsay"
+version = "1.2.0"
+description = "A Cowsay clone in Python"
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "python-cowsay-1.2.0.tar.gz", hash = "sha256:eae49ea3abc00dba38f166e92f2e8f103a75182a944eb7b79aab5b515ca0363d"},
+    {file = "python_cowsay-1.2.0-py3-none-any.whl", hash = "sha256:69aa91072e36ff27ceb8261718323c9ab275b3470b2260841c5b9ad5d83e8ff3"},
+]
+
+[[package]]
 name = "python-dotenv"
 version = "0.20.0"
 description = "Read key-value pairs from a .env file and set them as environment variables"
@@ -1681,4 +1692,4 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "50c6341445651d88317ee1bf88a303b04a8d87b2dfdf0b9a86a58d63ab911f58"
+content-hash = "19f7d0a4fa6a960209442daf5f929014dc98e85b8f4b4dd50fda7ee5cc29767b"
