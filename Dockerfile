@@ -1,35 +1,27 @@
-FROM python:3.10-slim as base
-
-ENV PYTHONFAULTHANDLER=1 \
-    PYTHONHASHSEED=random \
-    PYTHONUNBUFFERED=1
-
-RUN apt-get update && apt-get install -y libffi-dev libnacl-dev python3-dev gcc g++
-WORKDIR /app
+FROM python:3.11-slim as base
 
 FROM base as builder
 
-ENV PIP_DEFAULT_TIMEOUT=100 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_NO_CACHE_DIR=1 \
+ENV PATH="/root/.local/bin:${PATH}" \
     POETRY_VERSION=1.8.3
 
-RUN pip install "poetry==$POETRY_VERSION"
-RUN python -m venv /venv
-
-COPY pyproject.toml poetry.lock ./
-RUN . /venv/bin/activate && poetry install --only main --no-root
+WORKDIR /src
 
 COPY . .
-RUN . /venv/bin/activate && poetry build
+
+RUN apt-get update && \
+    apt-get install --no-install-suggests --no-install-recommends --yes pipx && \
+    pipx install "poetry==$POETRY_VERSION" && \
+    pipx inject poetry poetry-plugin-bundle && \
+    poetry bundle venv --python=/usr/bin/python3 --only=main /venv
 
 FROM base as final
 
-COPY --from=builder /venv /venv
-COPY --from=builder /app/dist .
-COPY docker-entrypoint.sh ./
-
 EXPOSE 8080
 
-RUN . /venv/bin/activate && pip install *.whl && chmod +x docker-entrypoint.sh && sync
-CMD ["./docker-entrypoint.sh"]
+WORKDIR /app
+
+COPY --from=builder /venv /venv
+COPY docker-entrypoint.sh .
+
+CMD ["sh", "docker-entrypoint.sh"]
