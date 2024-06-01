@@ -4,7 +4,7 @@ ENV PYTHONFAULTHANDLER=1 \
     PYTHONHASHSEED=random \
     PYTHONUNBUFFERED=1
 
-RUN apt-get update && apt-get install -y libffi-dev libnacl-dev python3-dev
+RUN apt-get update && apt-get install -y libffi-dev libnacl-dev python3-dev gcc g++
 WORKDIR /app
 
 FROM base as builder
@@ -28,6 +28,8 @@ FROM base as final
 COPY --from=builder /venv /venv
 COPY --from=builder /app/dist .
 COPY docker-entrypoint.sh ./
+
+EXPOSE 8080
 
 RUN . /venv/bin/activate && pip install *.whl && chmod +x docker-entrypoint.sh && sync
 CMD ["./docker-entrypoint.sh"]

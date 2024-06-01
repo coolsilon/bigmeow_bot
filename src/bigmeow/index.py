@@ -2,16 +2,19 @@ import asyncio
 import csv
 import logging
 import os
+import secrets
+from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from enum import Enum
 from functools import reduce
 from io import BytesIO, StringIO
 from random import choice, randint, shuffle
-from typing import Generator, NamedTuple, NoReturn
+from typing import AsyncGenerator, Generator, NamedTuple, NoReturn
 
 import discord
 import requests
 import structlog
+from aiohttp import web
 from cowsay import cowsay
 from dotenv import load_dotenv
 from telegram import Update
@@ -112,12 +115,16 @@ def discord_init_client() -> discord.Client:
     intents.message_content = True
     return discord.Client(intents=discord.Intents(messages=True, message_content=True))
 
+load_dotenv()
 
 CACHE_LIMIT = 5
 DATE_FORMAT = "%d/%m/%Y"
+SECRET_TOKEN = secrets.token_hex(128)
 
 logger = structlog.get_logger()
 client = discord_init_client()
+application = ApplicationBuilder().token(os.environ["TELEGRAM_TOKEN"]).build()
+routes = web.RouteTableDef()
 cat_cache = Cat_Cache()
 fact_cache = Fact_Cache()
 latest_cache = Latest(Level(date.min, 0, 0, 0), Change(date.min, 0, 0, 0))
@@ -246,28 +253,27 @@ async def on_message(message) -> None:
         )
 
 
-def telegram_init_application() -> Application:
-    application = ApplicationBuilder().token(os.environ["TELEGRAM_TOKEN"]).build()
+async def telegram_webhook() -> NoReturn:
+    global application
 
     application.add_handler(CommandHandler(MeowCommand.PETROL.value, telegram_petrol))
     application.add_handler(CommandHandler(MeowCommand.SAY.value, telegram_say))
     application.add_handler(CommandHandler(MeowCommand.FACT.value, telegram_fact))
     application.add_handler(MessageHandler(filters.TEXT, telegram_meow))
 
-    return application
+    await application.bot.set_webhook(
+        f'{os.environ["WEBHOOK_URL"]}/telegram',
+        allowed_updates=Update.ALL_TYPES,
+        secret_token=SECRET_TOKEN,
+    )
 
-
-async def telegram_run(application: Application) -> NoReturn:
     await application.initialize()
-    await application.start()
 
-    if application.updater:
-        queue = await application.updater.start_polling()
-
+    async with application:
+        await application.start()
         while True:
-            update = await queue.get()
-            logger.info(update=update)
-            queue.task_done()
+            await asyncio.sleep(3600)
+
 
 async def telegram_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info(update)
@@ -333,14 +339,57 @@ async def telegram_meow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
 
 
+
+@routes.get("/")
+async def hello(request: web.Request) -> web.Response:
+    return web.Response(text="Hello, world")
+
+
+@routes.post("/telegram")
+async def web_telegram(request: web.Request) -> web.Response:
+    assert SECRET_TOKEN == request.headers["X-Telegram-Bot-Api-Secret-Token"]
+
+    logger.info("Webhook received a request")
+
+    global application
+
+    data = await request.json()
+    update = Update.de_json(data, application.bot)
+
+    await application.update_queue.put(update)
+
+    return web.Response()
+
+
+def web_init() -> web.Application:
+    global routes
+
+    application = web.Application()
+    application.add_routes(routes)
+
+    return application
+
+
+async def web_run(application: web.Application) -> NoReturn:
+    runner = web.AppRunner(application)
+    await runner.setup()
+
+    site = web.TCPSite(runner, port=8080)
+    await site.start()
+
+    while True:
+        await asyncio.sleep(3600)
+
+
 async def main():
+    global client
+
     await asyncio.gather(
+        web_run(web_init()),
         client.start(os.environ["DISCORD_TOKEN"]),
-        telegram_run(telegram_init_application()),
+        telegram_webhook(),
     )
 
 
 if __name__ == "__main__":
-    load_dotenv()
-
     asyncio.run(main())

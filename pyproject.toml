@@ -12,6 +12,7 @@ structlog = "^24.2.0"
 python-telegram-bot = "^21.2"
 python-cowsay = "^1.2.0"
 discord-py = "^2.3.2"
+aiohttp = "^3.9.5"
 
 [tool.poetry.group.dev.dependencies]
 black = "^24.4.2"
