@@ -95,6 +95,11 @@ class MeowCommand(Enum):
     PETROL = "meowpetrol"
     FACT = "meowfact"
 
+    def telegram(self) -> str:
+        COMMAND_PREFIX = "/"
+
+        return f"{COMMAND_PREFIX}{self.value}"
+
     def __str__(self) -> str:
         COMMAND_PREFIX = "!"
 
@@ -222,7 +227,7 @@ async def on_message(message) -> None:
     elif message.content.startswith(str(MeowCommand.SAY)):
         logger.info(message)
         await message.channel.send(
-            meow_say(message.content.replace("!meowsay", "").strip())
+            meow_say(message.content.replace(str(MeowCommand.SAY), "").strip())
         )
 
     elif message.content.startswith(str(MeowCommand.FACT)):
@@ -290,7 +295,11 @@ async def telegram_say(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             parse_mode=ParseMode.MARKDOWN,
-            text=meow_say(update.message.text.replace("/meowsay", "").strip()),
+            text=meow_say(
+                update.message.text.replace(MeowCommand.SAY.telegram(), "")
+                .replace(str(MeowCommand.SAY), "")
+                .strip()
+            ),
         )
 
 
@@ -324,10 +333,14 @@ async def telegram_meow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
 
 
+async def main():
+    await asyncio.gather(
+        client.start(os.environ["DISCORD_TOKEN"]),
+        telegram_run(telegram_init_application()),
+    )
+
+
 if __name__ == "__main__":
     load_dotenv()
 
-    loop = asyncio.get_event_loop()
-    loop.create_task(client.start(os.environ["DISCORD_TOKEN"]))
-    loop.create_task(telegram_run(telegram_init_application()))
-    loop.run_forever()
+    asyncio.run(main())
