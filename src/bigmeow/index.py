@@ -102,7 +102,7 @@ CACHE_LIMIT = 5
 DATE_FORMAT = "%d/%m/%Y"
 
 logger = structlog.get_logger()
-client = discord.Client()
+client = discord.Client(intents=discord.Intents(messages=True, message_content=True))
 cat_cache = Cat_Cache()
 fact_cache = Fact_Cache()
 latest_cache = Latest(Level(date.min, 0, 0, 0), Change(date.min, 0, 0, 0))
@@ -127,7 +127,9 @@ def meow_fact():
     response = requests.get("https://meowfacts.herokuapp.com/")
 
     return (
-        fact_cache.cache(response.json().get("data")[0])
+        fact_cache.cache(
+            f'{response.json().get("data")[0]}\n    - https://github.com/wh-iterabb-it/meowfacts'
+        )
         if response.status_code == 200
         else fact_cache.get()
     )
@@ -137,10 +139,6 @@ def meowpetrol_fetch_price() -> Generator[str, None, None]:
     global latest_cache
 
     if (latest_cache.level.date + timedelta(days=6)) < date.today():
-        yield (
-            "Request received, fetching and parsing data from https://storage.data.gov.my/commodities/fuelprice.csv"
-        )
-
         response = requests.get("https://storage.data.gov.my/commodities/fuelprice.csv")
         latest_cache = reduce(
             meowpetrol_update_latest,
@@ -162,6 +160,8 @@ def meowpetrol_fetch_price() -> Generator[str, None, None]:
             ],
             latest_cache,
         )
+
+    yield "Data sourced from https://storage.data.gov.my/commodities/fuelprice.csv"
 
     yield (
         f"From {latest_cache.level.date.strftime(DATE_FORMAT)} to "
@@ -222,7 +222,12 @@ async def on_message(message) -> None:
     elif "meow" in message.content.lower():
         logger.info(message)
         await message.channel.send(
-            file=discord.File(meow_fetch_photo(), filename="meow.png")
+            "photo from https://cataas.com/",
+            file=discord.File(
+                meow_fetch_photo(),
+                description="photo from https://cataas.com/",
+                filename="meow.png",
+            ),
         )
 
 
@@ -303,7 +308,9 @@ async def telegram_meow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     ):
         logger.info(update)
         await context.bot.send_photo(
-            chat_id=update.effective_chat.id, photo=meow_fetch_photo()
+            chat_id=update.effective_chat.id,
+            photo=meow_fetch_photo(),
+            caption="photo from https://cataas.com/",
         )
 
 
