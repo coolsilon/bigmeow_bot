@@ -15,3 +15,30 @@ A dumb experimental bot done for no good reason
 * If your message has a `meow` in it, a cat photo is fetched from https://cataas.com/
 
 NOTE: all `!` commands can be replaced by `/` in telegram, e.g. `/meowsay hello world`.
+
+## Running bigmeow
+
+### Docker
+
+You can pull an image from https://hub.docker.com/r/jeffrey04/bigmeow_bot and supply the following environment variables to run the container.
+
+```
+DISCORD_APP_ID=<DISCORD APP ID>
+DISCORD_APP_PUBLIC=<DISCORD APP PUBLIC KEY>
+DISCORD_TOKEN=<DISCORD TOKEN>
+TELEGRAM_TOKEN=<TELEGRAM TOKEN>
+```
+
+### Python
+
+Project is developed with Python 3.10, and is managed by poetry. Refer to the previous section, and prepare a `.env` file in the base project folder to populate the environment variables. Once prepared, install the project with
+
+```
+$ poetry install
+```
+
+Then run it with
+
+```
+$ poetry run python -m bigmeow.index
+```
