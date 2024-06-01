@@ -3,6 +3,7 @@ import os
 from datetime import date, timedelta
 from functools import reduce
 from io import BytesIO, StringIO
+from random import choice, randint, shuffle
 from typing import NamedTuple, NoReturn
 
 import discord
@@ -18,8 +19,25 @@ from telegram.ext import (
     filters,
 )
 
-logger = structlog.get_logger()
-client = discord.Client()
+
+class Cat_Cache:
+    cat_list: list[BytesIO] = []
+
+    def cache(self, cat: BytesIO) -> BytesIO:
+        logger.info("Storing a cat into the cache")
+
+        if len(self.cat_list) > CAT_CACHE_LIMIT:
+            self.cat_list[randint(0, CAT_CACHE_LIMIT - 1)] = cat
+        else:
+            self.cat_list.append(cat)
+
+        shuffle(self.cat_list)
+
+        return cat
+
+    def get(self) -> BytesIO:
+        logger.info("Fetching a cat from cache")
+        return choice(self.cat_list)
 
 
 class Row(NamedTuple):
@@ -42,7 +60,12 @@ class Latest(NamedTuple):
     change: Change
 
 
+CAT_CACHE_LIMIT = 5
 DATE_FORMAT = "%d/%m/%Y"
+
+logger = structlog.get_logger()
+client = discord.Client()
+cat_cache = Cat_Cache()
 
 
 def meowpetrol_update_latest(current: Latest, incoming: Level | Change) -> Latest:
@@ -106,7 +129,11 @@ def meow_fetch_photo() -> BytesIO:
     logger.info("Fetching cat photo from cataas.com")
     response = requests.get("https://cataas.com/cat/says/meow?type=square", stream=True)
 
-    return BytesIO(response.raw.read())
+    return (
+        cat_cache.cache(BytesIO(response.raw.read()))
+        if response.status_code == 200
+        else cat_cache.get()
+    )
 
 
 @client.event
