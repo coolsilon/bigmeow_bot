@@ -1,15 +1,13 @@
 import asyncio
 import csv
-import logging
 import os
 import secrets
-from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from enum import Enum
 from functools import reduce
 from io import BytesIO, StringIO
 from random import choice, randint, shuffle
-from typing import AsyncGenerator, Generator, NamedTuple, NoReturn
+from typing import Generator, NamedTuple, NoReturn
 
 import discord
 import requests
@@ -20,7 +18,6 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import (
-    Application,
     ApplicationBuilder,
     CommandHandler,
     ContextTypes,
@@ -267,10 +264,9 @@ async def telegram_webhook() -> NoReturn:
         secret_token=SECRET_TOKEN,
     )
 
-    await application.initialize()
-
     async with application:
         await application.start()
+
         while True:
             await asyncio.sleep(3600)
 
@@ -347,16 +343,14 @@ async def hello(request: web.Request) -> web.Response:
 
 @routes.post("/telegram")
 async def web_telegram(request: web.Request) -> web.Response:
+    global application
+
     assert SECRET_TOKEN == request.headers["X-Telegram-Bot-Api-Secret-Token"]
 
     logger.info("Webhook received a request")
-
-    global application
-
-    data = await request.json()
-    update = Update.de_json(data, application.bot)
-
-    await application.update_queue.put(update)
+    await application.update_queue.put(
+        Update.de_json(await request.json(), application.bot)
+    )
 
     return web.Response()
 
