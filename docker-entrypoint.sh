@@ -7,4 +7,4 @@ set -e
 # TODO not sure why poetry bundle would fail to populate path correctly
 export PYTHONPATH=/venv/lib/python3.11/site-packages/
 
-exec python -m bigmeow.index
+exec python -m bigmeow.main
