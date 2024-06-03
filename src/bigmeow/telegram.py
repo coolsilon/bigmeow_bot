@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import (
+    Application,
     ApplicationBuilder,
     CommandHandler,
     ContextTypes,
@@ -16,47 +17,52 @@ from telegram.ext import (
 )
 
 import bigmeow.settings as settings
-from bigmeow.meow import meow_fact, meow_fetch_photo, meow_say, meowpetrol_fetch_price
+from bigmeow.meow import meow_fact, meow_fetch_photo, meow_petrol, meow_say
 from bigmeow.settings import MeowCommand
 
 load_dotenv()
 
 logger = structlog.get_logger()
-telegram_application = ApplicationBuilder().token(os.environ["TELEGRAM_TOKEN"]).build()
+application = ApplicationBuilder().token(os.environ["TELEGRAM_TOKEN"]).build()
 
 
 async def telegram_run() -> NoReturn:
-    global telegram_application
+    global application
 
-    telegram_application.add_handler(
-        CommandHandler(MeowCommand.PETROL.value, telegram_petrol)
-    )
-    telegram_application.add_handler(
-        CommandHandler(MeowCommand.SAY.value, telegram_say)
-    )
-    telegram_application.add_handler(
-        CommandHandler(MeowCommand.FACT.value, telegram_fact)
-    )
-    telegram_application.add_handler(MessageHandler(filters.TEXT, telegram_filter))
+    application.add_handler(CommandHandler(MeowCommand.PETROL.value, telegram_petrol))
+    application.add_handler(CommandHandler(MeowCommand.SAY.value, telegram_say))
+    application.add_handler(CommandHandler(MeowCommand.FACT.value, telegram_fact))
+    application.add_handler(MessageHandler(filters.TEXT, telegram_filter))
 
-    await telegram_application.bot.set_webhook(
+    await application.bot.set_webhook(
         f'{os.environ["WEBHOOK_URL"]}/telegram',
         allowed_updates=Update.ALL_TYPES,
         secret_token=settings.SECRET_TOKEN,
     )
 
     try:
-        async with telegram_application:
+        async with application:
             logger.info("TELEGRAM: Starting")
-            await telegram_application.start()
+            await application.start()
+
+            logger.info(
+                "TELEGRAM: Sending up message to owner",
+                chat_id=os.environ["TELEGRAM_CHAT"],
+            )
+            await application.bot.send_message(
+                chat_id=os.environ["TELEGRAM_CHAT"],
+                text=meow_say(
+                    f"Bot @{(await application.bot.get_me()).username} is up"
+                ),
+            )
 
             while True:
                 await asyncio.sleep(3600)
 
     except (RuntimeError, asyncio.CancelledError):
-        if telegram_application.running:
+        if application.running:
             logger.info("TELEGRAM: Stopping")
-            await telegram_application.stop()
+            await application.stop()
 
             logger.info("TELEGRAM: Stopped")
 
@@ -69,7 +75,7 @@ async def telegram_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 parse_mode=ParseMode.MARKDOWN,
-                text=meow_say(await meow_fact(session)),
+                text=await meow_fact(session),
             )
 
 
@@ -78,10 +84,11 @@ async def telegram_petrol(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     async with ClientSession() as session:
         if update.effective_chat:
-            async for text in meowpetrol_fetch_price(session):
-                await context.bot.send_message(
-                    chat_id=update.effective_chat.id, text=text
-                )
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                parse_mode=ParseMode.MARKDOWN,
+                text=await meow_petrol(session),
+            )
 
 
 async def telegram_say(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -19,17 +19,17 @@ SECRET_PING = secrets.token_hex(128)
 
 
 def web_init(telegram_application: Application) -> web.Application:
-    web_routes = web.RouteTableDef()
+    routes = web.RouteTableDef()
 
-    @web_routes.get("/")
+    @routes.get("/")
     async def hello(request: web.Request) -> web.Response:
         return web.Response(text="Hello, world")
 
-    @web_routes.get(f"/{SECRET_PING}")
+    @routes.get(f"/{SECRET_PING}")
     async def pong(request: web.Request) -> web.Response:
         return web.Response(text="pong")
 
-    @web_routes.post("/telegram")
+    @routes.post("/telegram")
     async def web_telegram(request: web.Request) -> web.Response:
         nonlocal telegram_application
 
@@ -44,15 +44,15 @@ def web_init(telegram_application: Application) -> web.Application:
 
         return web.Response()
 
-    web_application = web.Application()
-    web_application.add_routes(web_routes)
+    application = web.Application()
+    application.add_routes(routes)
 
-    return web_application
+    return application
 
 
-async def web_run(web_application: web.Application) -> NoReturn:
+async def web_run(application: web.Application) -> NoReturn:
     logger.info("WEBHOOK: Starting", url=os.environ["WEBHOOK_URL"])
-    web_runner = web.AppRunner(web_application)
+    web_runner = web.AppRunner(application)
     await web_runner.setup()
 
     web_site = web.TCPSite(web_runner, port=8080)
@@ -63,8 +63,11 @@ async def web_run(web_application: web.Application) -> NoReturn:
         async with ClientSession() as session:
             while True:
                 if not await web_check(session):
+                    logger.error("WEBHOOK: Website is not up, stopping")
                     await web_site.stop()
                     await web_runner.cleanup()
+
+                    logger.error("WEBHOOK: Stopped")
                     break
 
                 await asyncio.sleep(3600)
@@ -81,7 +84,7 @@ async def web_check(session: ClientSession) -> bool:
 
     async with session.get(ping_url) as response:
         if response.status == 200 and (await response.text()).strip() == "pong":
-            logger.info("WEBHOOK: website is up", ping_url=ping_url)
+            logger.info("WEBHOOK: Website is up", ping_url=ping_url)
             result = True
 
     return result

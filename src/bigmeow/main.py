@@ -25,7 +25,7 @@ async def main(loop: asyncio.AbstractEventLoop) -> None:
         tasks = [
             tg.create_task(telegram_run()),
             tg.create_task(discord_run()),
-            tg.create_task(web_run(web_init(telegram.telegram_application))),
+            tg.create_task(web_run(web_init(telegram.application))),
         ]
 
         for s in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):

@@ -3,7 +3,7 @@ from datetime import date, timedelta
 from functools import reduce
 from io import BytesIO, StringIO
 from random import choice
-from typing import AsyncGenerator
+from typing import Callable
 
 import structlog
 from aiohttp import ClientSession
@@ -15,6 +15,12 @@ from bigmeow.settings import Change, Latest, Level
 
 load_dotenv()
 logger = structlog.get_logger()
+
+def meow_sayify(func: Callable) -> Callable:
+    async def wrapped_function(*args, **kwargs) -> str:
+        return meow_say(await func(*args, **kwargs))
+
+    return wrapped_function
 
 
 def meowpetrol_update_latest(current: Latest, incoming: Level | Change) -> Latest:
@@ -30,6 +36,7 @@ def meowpetrol_update_latest(current: Latest, incoming: Level | Change) -> Lates
     return current._replace(**{field: incoming}) if field else current  # type: ignore
 
 
+@meow_sayify
 async def meow_fact(session: ClientSession) -> str:
     url = "https://meowfacts.herokuapp.com/"
 
@@ -47,7 +54,8 @@ async def meow_fact(session: ClientSession) -> str:
             )
 
 
-async def meowpetrol_fetch_price(session: ClientSession) -> AsyncGenerator[str, None]:
+@meow_sayify
+async def meow_petrol(session: ClientSession) -> str:
     url = "https://storage.data.gov.my/commodities/fuelprice.csv"
 
     async with settings.latest_lock:
@@ -75,15 +83,13 @@ async def meowpetrol_fetch_price(session: ClientSession) -> AsyncGenerator[str, 
                     settings.latest_cache,
                 )
 
-        yield f"Data sourced from {url}"
-
-        yield (
-            f"From {settings.latest_cache.level.date.strftime(settings.DATE_FORMAT)} to "
-            f"{(settings.latest_cache.level.date + timedelta(days=6)).strftime(settings.DATE_FORMAT)}"
-        )
-
-        for field in ("ron95", "ron97", "diesel"):
-            yield (
+        logger.info(
+            (
+                f"Data sourced from {url}",
+                f"From {settings.latest_cache.level.date.strftime(settings.DATE_FORMAT)} to "
+                f"{(settings.latest_cache.level.date + timedelta(days=6)).strftime(settings.DATE_FORMAT)}",
+            )
+            + tuple(
                 "Price of {} is RM {} per litre ({} from last week)".format(
                     {"ron95": "RON 95", "ron97": "RON 97", "diesel": "diesel"}.get(
                         field
@@ -91,7 +97,26 @@ async def meowpetrol_fetch_price(session: ClientSession) -> AsyncGenerator[str, 
                     getattr(settings.latest_cache.level, field),
                     "{:+0.2f}".format(getattr(settings.latest_cache.change, field)),
                 )
+                for field in ("ron95", "ron97", "diesel")
             )
+        )
+        return "\n\n".join(
+            (
+                f"Data sourced from {url}",
+                f"From {settings.latest_cache.level.date.strftime(settings.DATE_FORMAT)} to "
+                f"{(settings.latest_cache.level.date + timedelta(days=6)).strftime(settings.DATE_FORMAT)}",
+            )
+            + tuple(
+                "Price of {} is RM {} per litre ({} from last week)".format(
+                    {"ron95": "RON 95", "ron97": "RON 97", "diesel": "diesel"}.get(
+                        field
+                    ),
+                    getattr(settings.latest_cache.level, field),
+                    "{:+0.2f}".format(getattr(settings.latest_cache.change, field)),
+                )
+                for field in ("ron95", "ron97", "diesel")
+            )
+        )
 
 
 async def meow_fetch_photo(session: ClientSession) -> BytesIO:
