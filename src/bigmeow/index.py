@@ -1,14 +1,12 @@
 import asyncio
 import csv
 import os
-import secrets
 import signal
 from datetime import date, timedelta
-from enum import Enum
 from functools import reduce
 from io import BytesIO, StringIO
-from random import choice, randint, shuffle
-from typing import AsyncGenerator, NamedTuple, NoReturn
+from random import choice
+from typing import AsyncGenerator, NoReturn
 
 import discord
 import structlog
@@ -25,87 +23,9 @@ from telegram.ext import (
     filters,
 )
 
+import bigmeow.settings as settings
+from bigmeow.settings import Change, Latest, Level, MeowCommand
 from bigmeow.web import web_init, web_run
-
-
-# TODO use proper typing and abstrct to abstract class in py3.12
-class Cat_Cache:
-    cat_list: list[BytesIO] = []
-
-    def cache(self, cat: BytesIO) -> BytesIO:
-        logger.info("Storing a cat into the cache")
-
-        if len(self.cat_list) > CACHE_LIMIT:
-            self.cat_list[randint(0, CACHE_LIMIT - 1)] = cat
-        else:
-            self.cat_list.append(cat)
-
-        shuffle(self.cat_list)
-
-        return cat
-
-    def get(self) -> BytesIO:
-        assert len(self.cat_list) > 0
-
-        logger.info("Fetching a cat from cache")
-        return choice(self.cat_list)
-
-class Fact_Cache:
-    fact_list: list[str] = []
-
-    def cache(self, fact: str) -> str:
-        logger.info("Storing a fact into the cache")
-
-        if len(self.fact_list) > CACHE_LIMIT:
-            self.fact_list[randint(0, CACHE_LIMIT - 1)] = fact
-        else:
-            self.fact_list.append(fact)
-
-        shuffle(self.fact_list)
-
-        return fact
-
-    def get(self) -> str:
-        assert len(self.fact_list) > 0
-
-        logger.info("Fetching a fact from cache")
-        return choice(self.fact_list)
-
-
-class Row(NamedTuple):
-    date: date
-    ron95: float
-    ron97: float
-    diesel: float
-
-
-class Level(Row):
-    pass
-
-
-class Change(Row):
-    pass
-
-
-class Latest(NamedTuple):
-    level: Level
-    change: Change
-
-
-class MeowCommand(Enum):
-    SAY = "meowsay"
-    PETROL = "meowpetrol"
-    FACT = "meowfact"
-
-    def telegram(self) -> str:
-        COMMAND_PREFIX = "/"
-
-        return f"{COMMAND_PREFIX}{self.value}"
-
-    def __str__(self) -> str:
-        COMMAND_PREFIX = "!"
-
-        return f"{COMMAND_PREFIX}{self.value}"
 
 
 def discord_init_client() -> discord.Client:
@@ -131,22 +51,15 @@ async def discord_run():
 
 load_dotenv()
 
-CACHE_LIMIT = 5
-DATE_FORMAT = "%d/%m/%Y"
-SECRET_TOKEN = secrets.token_hex(128)
 
 logger = structlog.get_logger()
 discord_client = discord_init_client()
 telegram_application = ApplicationBuilder().token(os.environ["TELEGRAM_TOKEN"]).build()
 
-cat_cache = Cat_Cache()
-fact_cache = Fact_Cache()
-latest_cache = Latest(Level(date.min, 0, 0, 0), Change(date.min, 0, 0, 0))
-
 def meowpetrol_update_latest(current: Latest, incoming: Level | Change) -> Latest:
     field = None
 
-    if isinstance(incoming, Level):
+    if isinstance(incoming, settings.Level):
         if incoming.date > current.level.date:
             field = "level"
     else:
@@ -157,76 +70,75 @@ def meowpetrol_update_latest(current: Latest, incoming: Level | Change) -> Lates
 
 
 async def meow_fact(session: ClientSession) -> str:
-    global fact_cache
-
     async with session.get("https://meowfacts.herokuapp.com/") as response:
         response_data = await response.json()
 
-        return (
-            fact_cache.cache(
-                f'{response_data.get("data")[0]}\n    - https://github.com/wh-iterabb-it/meowfacts'
+        async with settings.fact_lock:
+            return (
+                settings.fact_cache.cache(
+                    f'{response_data.get("data")[0]}\n    - https://github.com/wh-iterabb-it/meowfacts'
+                )
+                if response.status == 200
+                else settings.fact_cache.get()
             )
-            if response.status == 200
-            else fact_cache.get()
-        )
 
 
 async def meowpetrol_fetch_price(session: ClientSession) -> AsyncGenerator[str, None]:
-    global latest_cache
+    async with settings.latest_lock:
+        if (settings.latest_cache.level.date + timedelta(days=6)) < date.today():
+            async with session.get(
+                "https://storage.data.gov.my/commodities/fuelprice.csv"
+            ) as response:
+                settings.latest_cache = reduce(
+                    meowpetrol_update_latest,
+                    [
+                        Level(
+                            date.fromisoformat(row["date"]),
+                            float(row["ron95"]),
+                            float(row["ron97"]),
+                            float(row["diesel"]),
+                        )
+                        if row["series_type"] == "level"
+                        else Change(
+                            date.fromisoformat(row["date"]),
+                            float(row["ron95"]),
+                            float(row["ron97"]),
+                            float(row["diesel"]),
+                        )
+                        for row in csv.DictReader(StringIO(await response.text()))
+                    ],
+                    settings.latest_cache,
+                )
 
-    if (latest_cache.level.date + timedelta(days=6)) < date.today():
-        async with session.get(
-            "https://storage.data.gov.my/commodities/fuelprice.csv"
-        ) as response:
-            latest_cache = reduce(
-                meowpetrol_update_latest,
-                [
-                    Level(
-                        date.fromisoformat(row["date"]),
-                        float(row["ron95"]),
-                        float(row["ron97"]),
-                        float(row["diesel"]),
-                    )
-                    if row["series_type"] == "level"
-                    else Change(
-                        date.fromisoformat(row["date"]),
-                        float(row["ron95"]),
-                        float(row["ron97"]),
-                        float(row["diesel"]),
-                    )
-                    for row in csv.DictReader(StringIO(await response.text()))
-                ],
-                latest_cache,
-            )
+        yield "Data sourced from https://storage.data.gov.my/commodities/fuelprice.csv"
 
-    yield "Data sourced from https://storage.data.gov.my/commodities/fuelprice.csv"
-
-    yield (
-        f"From {latest_cache.level.date.strftime(DATE_FORMAT)} to "
-        f"{(latest_cache.level.date + timedelta(days=6)).strftime(DATE_FORMAT)}"
-    )
-
-    for field in ("ron95", "ron97", "diesel"):
         yield (
-            "Price of {} is RM {} per litre ({} from last week)".format(
-                {"ron95": "RON 95", "ron97": "RON 97", "diesel": "diesel"}.get(field),
-                getattr(latest_cache.level, field),
-                "{:+0.2f}".format(getattr(latest_cache.change, field)),
-            )
+            f"From {settings.latest_cache.level.date.strftime(settings.DATE_FORMAT)} to "
+            f"{(settings.latest_cache.level.date + timedelta(days=6)).strftime(settings.DATE_FORMAT)}"
         )
+
+        for field in ("ron95", "ron97", "diesel"):
+            yield (
+                "Price of {} is RM {} per litre ({} from last week)".format(
+                    {"ron95": "RON 95", "ron97": "RON 97", "diesel": "diesel"}.get(
+                        field
+                    ),
+                    getattr(settings.latest_cache.level, field),
+                    "{:+0.2f}".format(getattr(settings.latest_cache.change, field)),
+                )
+            )
 
 
 async def meow_fetch_photo(session: ClientSession) -> BytesIO:
-    global cat_cache
-
     async with session.get("https://cataas.com/cat/says/meow?type=square") as response:
         logger.info("Fetching cat photo from cataas.com")
 
-        return (
-            cat_cache.cache(BytesIO(await response.read()))
-            if response.status == 200
-            else cat_cache.get()
-        )
+        async with settings.cat_lock:
+            return (
+                settings.cat_cache.cache(BytesIO(await response.read()))
+                if response.status == 200
+                else settings.cat_cache.get()
+            )
 
 
 def meow_say(message: str) -> str:
@@ -285,7 +197,7 @@ async def telegram_webhook() -> NoReturn:
     await telegram_application.bot.set_webhook(
         f'{os.environ["WEBHOOK_URL"]}/telegram',
         allowed_updates=Update.ALL_TYPES,
-        secret_token=SECRET_TOKEN,
+        secret_token=settings.SECRET_TOKEN,
     )
 
     try:
@@ -391,7 +303,7 @@ async def main(loop: asyncio.AbstractEventLoop) -> None:
         tasks = [
             tg.create_task(telegram_webhook()),
             tg.create_task(discord_run()),
-            tg.create_task(web_run(web_init(telegram_application, SECRET_TOKEN))),
+            tg.create_task(web_run(web_init(telegram_application))),
         ]
 
         for s in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):

@@ -8,12 +8,14 @@ from aiohttp import ClientSession, web
 from telegram import Update
 from telegram.ext import Application
 
+import bigmeow.settings as settings
+
 logger = structlog.getLogger()
 
 SECRET_PING = secrets.token_hex(128)
 
 
-def web_init(telegram_application: Application, secret_token: str) -> web.Application:
+def web_init(telegram_application: Application) -> web.Application:
     web_routes = web.RouteTableDef()
 
     @web_routes.get("/")
@@ -28,7 +30,9 @@ def web_init(telegram_application: Application, secret_token: str) -> web.Applic
     async def web_telegram(request: web.Request) -> web.Response:
         nonlocal telegram_application
 
-        assert secret_token == request.headers["X-Telegram-Bot-Api-Secret-Token"]
+        assert (
+            settings.SECRET_TOKEN == request.headers["X-Telegram-Bot-Api-Secret-Token"]
+        )
 
         logger.info("Webhook received a request")
         await telegram_application.update_queue.put(
