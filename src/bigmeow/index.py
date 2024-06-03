@@ -2,6 +2,7 @@ import asyncio
 import csv
 import os
 import secrets
+import signal
 from datetime import date, timedelta
 from enum import Enum
 from functools import reduce
@@ -250,7 +251,7 @@ async def on_message(message) -> None:
         )
 
 
-async def telegram_webhook() -> NoReturn:
+async def telegram_webhook(loop: asyncio.AbstractEventLoop) -> NoReturn:
     global application
 
     application.add_handler(CommandHandler(MeowCommand.PETROL.value, telegram_petrol))
@@ -263,6 +264,8 @@ async def telegram_webhook() -> NoReturn:
         allowed_updates=Update.ALL_TYPES,
         secret_token=SECRET_TOKEN,
     )
+
+    loop.add_signal_handler(signal.SIGTERM, lambda: application.stop())
 
     async with application:
         await application.start()
@@ -364,26 +367,33 @@ def web_init() -> web.Application:
     return application
 
 
-async def web_run(application: web.Application) -> NoReturn:
+async def web_run(
+    application: web.Application, loop: asyncio.AbstractEventLoop
+) -> NoReturn:
     runner = web.AppRunner(application)
     await runner.setup()
 
     site = web.TCPSite(runner, port=8080)
     await site.start()
 
+    logger.info("Ready to receive webhook requests", url=os.environ["WEBHOOK_URL"])
+
+    loop.add_signal_handler(signal.SIGTERM, lambda: runner.cleanup())
+
     while True:
         await asyncio.sleep(3600)
 
 
-async def main():
+async def main(loop: asyncio.AbstractEventLoop) -> None:
     global client
 
     await asyncio.gather(
-        web_run(web_init()),
+        web_run(web_init(), loop),
         client.start(os.environ["DISCORD_TOKEN"]),
-        telegram_webhook(),
+        telegram_webhook(loop),
     )
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    with asyncio.Runner() as runner:
+        runner.run(main(runner.get_loop()))
