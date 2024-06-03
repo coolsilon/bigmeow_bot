@@ -8,12 +8,11 @@ from enum import Enum
 from functools import reduce
 from io import BytesIO, StringIO
 from random import choice, randint, shuffle
-from typing import Generator, NamedTuple, NoReturn
+from typing import AsyncGenerator, Awaitable, NamedTuple, NoReturn
 
 import discord
-import requests
 import structlog
-from aiohttp import web
+from aiohttp import ClientSession, web
 from cowsay import cowsay
 from dotenv import load_dotenv
 from telegram import Update
@@ -113,11 +112,27 @@ def discord_init_client() -> discord.Client:
     intents.message_content = True
     return discord.Client(intents=discord.Intents(messages=True, message_content=True))
 
+async def discord_run():
+    global client
+
+    try:
+        await client.start(os.environ["DISCORD_TOKEN"])
+        logger.info("Discord bot is running")
+
+    except asyncio.CancelledError:
+        if not client.is_closed():
+            logger.info("Stopping discord bot")
+            await client.close()
+
+            logger.info("Discord bot is terminated")
+
+
 load_dotenv()
 
 CACHE_LIMIT = 5
 DATE_FORMAT = "%d/%m/%Y"
 SECRET_TOKEN = secrets.token_hex(128)
+SECRET_PING = secrets.token_hex(128)
 
 logger = structlog.get_logger()
 client = discord_init_client()
@@ -126,7 +141,6 @@ routes = web.RouteTableDef()
 cat_cache = Cat_Cache()
 fact_cache = Fact_Cache()
 latest_cache = Latest(Level(date.min, 0, 0, 0), Change(date.min, 0, 0, 0))
-
 
 def meowpetrol_update_latest(current: Latest, incoming: Level | Change) -> Latest:
     field = None
@@ -141,45 +155,48 @@ def meowpetrol_update_latest(current: Latest, incoming: Level | Change) -> Lates
     return current._replace(**{field: incoming}) if field else current  # type: ignore
 
 
-def meow_fact():
+async def meow_fact(session: ClientSession) -> str:
     global fact_cache
 
-    response = requests.get("https://meowfacts.herokuapp.com/")
+    async with session.get("https://meowfacts.herokuapp.com/") as response:
+        response_data = await response.json()
 
-    return (
-        fact_cache.cache(
-            f'{response.json().get("data")[0]}\n    - https://github.com/wh-iterabb-it/meowfacts'
+        return (
+            fact_cache.cache(
+                f'{response_data.get("data")[0]}\n    - https://github.com/wh-iterabb-it/meowfacts'
+            )
+            if response.status == 200
+            else fact_cache.get()
         )
-        if response.status_code == 200
-        else fact_cache.get()
-    )
 
 
-def meowpetrol_fetch_price() -> Generator[str, None, None]:
+async def meowpetrol_fetch_price(session: ClientSession) -> AsyncGenerator[str, None]:
     global latest_cache
 
     if (latest_cache.level.date + timedelta(days=6)) < date.today():
-        response = requests.get("https://storage.data.gov.my/commodities/fuelprice.csv")
-        latest_cache = reduce(
-            meowpetrol_update_latest,
-            [
-                Level(
-                    date.fromisoformat(row["date"]),
-                    float(row["ron95"]),
-                    float(row["ron97"]),
-                    float(row["diesel"]),
-                )
-                if row["series_type"] == "level"
-                else Change(
-                    date.fromisoformat(row["date"]),
-                    float(row["ron95"]),
-                    float(row["ron97"]),
-                    float(row["diesel"]),
-                )
-                for row in csv.DictReader(StringIO(response.text))
-            ],
-            latest_cache,
-        )
+        async with session.get(
+            "https://storage.data.gov.my/commodities/fuelprice.csv"
+        ) as response:
+            latest_cache = reduce(
+                meowpetrol_update_latest,
+                [
+                    Level(
+                        date.fromisoformat(row["date"]),
+                        float(row["ron95"]),
+                        float(row["ron97"]),
+                        float(row["diesel"]),
+                    )
+                    if row["series_type"] == "level"
+                    else Change(
+                        date.fromisoformat(row["date"]),
+                        float(row["ron95"]),
+                        float(row["ron97"]),
+                        float(row["diesel"]),
+                    )
+                    for row in csv.DictReader(StringIO(await response.text()))
+                ],
+                latest_cache,
+            )
 
     yield "Data sourced from https://storage.data.gov.my/commodities/fuelprice.csv"
 
@@ -198,17 +215,17 @@ def meowpetrol_fetch_price() -> Generator[str, None, None]:
         )
 
 
-def meow_fetch_photo() -> BytesIO:
+async def meow_fetch_photo(session: ClientSession) -> BytesIO:
     global cat_cache
 
-    logger.info("Fetching cat photo from cataas.com")
-    response = requests.get("https://cataas.com/cat/says/meow?type=square", stream=True)
+    async with session.get("https://cataas.com/cat/says/meow?type=square") as response:
+        logger.info("Fetching cat photo from cataas.com")
 
-    return (
-        cat_cache.cache(BytesIO(response.raw.read()))
-        if response.status_code == 200
-        else cat_cache.get()
-    )
+        return (
+            cat_cache.cache(BytesIO(await response.read()))
+            if response.status == 200
+            else cat_cache.get()
+        )
 
 
 def meow_say(message: str) -> str:
@@ -222,42 +239,41 @@ async def on_message(message) -> None:
     if message.author == client.user:
         return
 
-    if message.content.startswith(str(MeowCommand.PETROL)):
-        logger.info(message)
-        messages = meowpetrol_fetch_price()
+    async with ClientSession() as session:
+        if message.content.startswith(str(MeowCommand.PETROL)):
+            logger.info(message)
+            async for text in meowpetrol_fetch_price(session):
+                await message.channel.send(text)
 
-        for text in messages:
-            await message.channel.send(text)
+        elif message.content.startswith(str(MeowCommand.SAY)):
+            logger.info(message)
+            await message.channel.send(
+                meow_say(message.content.replace(str(MeowCommand.SAY), "").strip())
+            )
 
-    elif message.content.startswith(str(MeowCommand.SAY)):
-        logger.info(message)
-        await message.channel.send(
-            meow_say(message.content.replace(str(MeowCommand.SAY), "").strip())
-        )
+        elif message.content.startswith(str(MeowCommand.FACT)):
+            logger.info(message)
+            await message.channel.send(meow_say(await meow_fact(session)))
 
-    elif message.content.startswith(str(MeowCommand.FACT)):
-        logger.info(message)
-        await message.channel.send(meow_say(meow_fact()))
-
-    elif "meow" in message.content.lower():
-        logger.info(message)
-        await message.channel.send(
-            "photo from https://cataas.com/",
-            file=discord.File(
-                meow_fetch_photo(),
-                description="photo from https://cataas.com/",
-                filename="meow.png",
-            ),
-        )
+        elif "meow" in message.content.lower():
+            logger.info(message)
+            await message.channel.send(
+                "photo from https://cataas.com/",
+                file=discord.File(
+                    await meow_fetch_photo(session),
+                    description="photo from https://cataas.com/",
+                    filename="meow.png",
+                ),
+            )
 
 
-async def telegram_webhook(loop: asyncio.AbstractEventLoop) -> NoReturn:
+async def telegram_webhook() -> NoReturn:
     global application
 
     application.add_handler(CommandHandler(MeowCommand.PETROL.value, telegram_petrol))
     application.add_handler(CommandHandler(MeowCommand.SAY.value, telegram_say))
     application.add_handler(CommandHandler(MeowCommand.FACT.value, telegram_fact))
-    application.add_handler(MessageHandler(filters.TEXT, telegram_meow))
+    application.add_handler(MessageHandler(filters.TEXT, telegram_filter))
 
     await application.bot.set_webhook(
         f'{os.environ["WEBHOOK_URL"]}/telegram',
@@ -265,32 +281,43 @@ async def telegram_webhook(loop: asyncio.AbstractEventLoop) -> NoReturn:
         secret_token=SECRET_TOKEN,
     )
 
-    loop.add_signal_handler(signal.SIGTERM, lambda: application.stop())
+    try:
+        async with application:
+            await application.start()
+            logger.info("Telegram bot is started")
 
-    async with application:
-        await application.start()
+            while True:
+                await asyncio.sleep(3600)
 
-        while True:
-            await asyncio.sleep(3600)
+    except (RuntimeError, asyncio.CancelledError):
+        if application.running:
+            logger.info("Stopping telegram bot")
+            await application.stop()
+
+            logger.info("Telegram bot is terminated")
 
 
 async def telegram_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info(update)
 
-    if update.effective_chat:
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            parse_mode=ParseMode.MARKDOWN,
-            text=meow_say(meow_fact()),
-        )
+    async with ClientSession() as session:
+        if update.effective_chat:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                parse_mode=ParseMode.MARKDOWN,
+                text=meow_say(await meow_fact(session)),
+            )
 
 
 async def telegram_petrol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info(update)
 
-    if update.effective_chat:
-        for text in meowpetrol_fetch_price():
-            await context.bot.send_message(chat_id=update.effective_chat.id, text=text)
+    async with ClientSession() as session:
+        if update.effective_chat:
+            async for text in meowpetrol_fetch_price(session):
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id, text=text
+                )
 
 
 async def telegram_say(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -308,40 +335,52 @@ async def telegram_say(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
 
 
-async def telegram_meow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if (
-        update.message
-        and update.effective_chat
-        and str(MeowCommand.SAY) in (update.message.text or "")
-    ):
-        logger.info(update)
-        await telegram_say(update, context)
+async def telegram_filter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async with ClientSession() as session:
+        if (
+            update.message
+            and update.effective_chat
+            and str(MeowCommand.SAY) in (update.message.text or "")
+        ):
+            logger.info(update)
+            await telegram_say(update, context)
 
-    elif (
-        update.message
-        and update.effective_chat
-        and str(MeowCommand.PETROL) in (update.message.text or "")
-    ):
-        logger.info(update)
-        await telegram_petrol(update, context)
+        elif (
+            update.message
+            and update.effective_chat
+            and str(MeowCommand.PETROL) in (update.message.text or "")
+        ):
+            logger.info(update)
+            await telegram_petrol(update, context)
 
-    elif (
-        update.message
-        and update.effective_chat
-        and "meow" in (update.message.text or "")
-    ):
-        logger.info(update)
-        await context.bot.send_photo(
-            chat_id=update.effective_chat.id,
-            photo=meow_fetch_photo(),
-            caption="photo from https://cataas.com/",
-        )
+        elif (
+            update.message
+            and update.effective_chat
+            and str(MeowCommand.FACT) in (update.message.text or "")
+        ):
+            logger.info(update)
+            await telegram_fact(update, context)
 
+        elif (
+            update.message
+            and update.effective_chat
+            and "meow" in (update.message.text or "")
+        ):
+            await context.bot.send_photo(
+                chat_id=update.effective_chat.id,
+                photo=await meow_fetch_photo(session),
+                caption="photo from https://cataas.com/",
+            )
 
 
 @routes.get("/")
 async def hello(request: web.Request) -> web.Response:
     return web.Response(text="Hello, world")
+
+
+@routes.get(f"/{SECRET_PING}")
+async def pong(request: web.Request) -> web.Response:
+    return web.Response(text="pong")
 
 
 @routes.post("/telegram")
@@ -367,31 +406,63 @@ def web_init() -> web.Application:
     return application
 
 
-async def web_run(
-    application: web.Application, loop: asyncio.AbstractEventLoop
-) -> NoReturn:
-    runner = web.AppRunner(application)
-    await runner.setup()
+async def web_run(application: web.Application) -> NoReturn:
+    web_runner = web.AppRunner(application)
+    await web_runner.setup()
 
-    site = web.TCPSite(runner, port=8080)
-    await site.start()
+    web_site = web.TCPSite(web_runner, port=8080)
+    await web_site.start()
 
     logger.info("Ready to receive webhook requests", url=os.environ["WEBHOOK_URL"])
 
-    loop.add_signal_handler(signal.SIGTERM, lambda: runner.cleanup())
+    try:
+        async with ClientSession() as session:
+            while True:
+                if not await web_check(session):
+                    await web_site.stop()
+                    await web_runner.cleanup()
+                    break
 
-    while True:
-        await asyncio.sleep(3600)
+                await asyncio.sleep(3600)
+    except asyncio.CancelledError:
+        logger.info("Shutting down web server")
+        await web_site.stop()
+        await web_runner.cleanup()
+
+        logger.info("Web server is terminated")
+
+
+async def web_check(session: ClientSession) -> bool:
+    result, ping_url = False, f'{os.environ["WEBHOOK_URL"]}/{SECRET_PING}'
+
+    async with session.get(ping_url) as response:
+        if response.status == 200 and (await response.text()).strip() == "pong":
+            logger.info("Webhook is online", ping_url=ping_url)
+            result = True
+
+    return result
+
+
+async def shutdown_handler(tasks, loop: asyncio.AbstractEventLoop) -> None:
+    for task in tasks:
+        if task is not asyncio.current_task():
+            task.cancel()
 
 
 async def main(loop: asyncio.AbstractEventLoop) -> None:
     global client
 
-    await asyncio.gather(
-        web_run(web_init(), loop),
-        client.start(os.environ["DISCORD_TOKEN"]),
-        telegram_webhook(loop),
-    )
+    async with asyncio.TaskGroup() as tg:
+        tasks = [
+            tg.create_task(telegram_webhook()),
+            tg.create_task(web_run(web_init())),
+            tg.create_task(discord_run()),
+        ]
+
+        for s in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(
+                s, lambda: asyncio.create_task(shutdown_handler(tasks, loop))
+            )
 
 
 if __name__ == "__main__":
