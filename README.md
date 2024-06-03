@@ -26,12 +26,16 @@ You can pull an image from https://hub.docker.com/r/jeffrey04/bigmeow_bot and su
 DISCORD_APP_ID=<DISCORD APP ID>
 DISCORD_APP_PUBLIC=<DISCORD APP PUBLIC KEY>
 DISCORD_TOKEN=<DISCORD TOKEN>
+DISCORD_USER=<OWNER DISCORD ID>
 TELEGRAM_TOKEN=<TELEGRAM TOKEN>
+TELEGRAM_CHAT=<OWNER TELEGRAM CHAT ID>
+WEBHOOK_URL=<URL TO WEBHOOK>
+DEBUG=<True IF RUNNING LOCALLY OTHERWISE False>
 ```
 
 ### Python
 
-Project is developed with Python 3.10, and is managed by poetry. Refer to the previous section, and prepare a `.env` file in the base project folder to populate the environment variables. Once prepared, install the project with
+Project is developed with Python 3.11, and is managed by poetry. Refer to the previous section, and prepare a `.env` file in the base project folder to populate the environment variables. Once prepared, install the project with
 
 ```
 $ poetry install
