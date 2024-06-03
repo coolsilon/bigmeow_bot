@@ -8,11 +8,11 @@ from enum import Enum
 from functools import reduce
 from io import BytesIO, StringIO
 from random import choice, randint, shuffle
-from typing import AsyncGenerator, Awaitable, NamedTuple, NoReturn
+from typing import AsyncGenerator, NamedTuple, NoReturn
 
 import discord
 import structlog
-from aiohttp import ClientSession, web
+from aiohttp import ClientSession
 from cowsay import cowsay
 from dotenv import load_dotenv
 from telegram import Update
@@ -24,6 +24,8 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+
+from bigmeow.web import web_init, web_run
 
 
 # TODO use proper typing and abstrct to abstract class in py3.12
@@ -113,16 +115,16 @@ def discord_init_client() -> discord.Client:
     return discord.Client(intents=discord.Intents(messages=True, message_content=True))
 
 async def discord_run():
-    global client
+    global discord_client
 
     try:
-        await client.start(os.environ["DISCORD_TOKEN"])
+        await discord_client.start(os.environ["DISCORD_TOKEN"])
         logger.info("Discord bot is running")
 
     except asyncio.CancelledError:
-        if not client.is_closed():
+        if not discord_client.is_closed():
             logger.info("Stopping discord bot")
-            await client.close()
+            await discord_client.close()
 
             logger.info("Discord bot is terminated")
 
@@ -132,12 +134,11 @@ load_dotenv()
 CACHE_LIMIT = 5
 DATE_FORMAT = "%d/%m/%Y"
 SECRET_TOKEN = secrets.token_hex(128)
-SECRET_PING = secrets.token_hex(128)
 
 logger = structlog.get_logger()
-client = discord_init_client()
-application = ApplicationBuilder().token(os.environ["TELEGRAM_TOKEN"]).build()
-routes = web.RouteTableDef()
+discord_client = discord_init_client()
+telegram_application = ApplicationBuilder().token(os.environ["TELEGRAM_TOKEN"]).build()
+
 cat_cache = Cat_Cache()
 fact_cache = Fact_Cache()
 latest_cache = Latest(Level(date.min, 0, 0, 0), Change(date.min, 0, 0, 0))
@@ -234,9 +235,9 @@ def meow_say(message: str) -> str:
     )
 
 
-@client.event
+@discord_client.event
 async def on_message(message) -> None:
-    if message.author == client.user:
+    if message.author == discord_client.user:
         return
 
     async with ClientSession() as session:
@@ -268,31 +269,37 @@ async def on_message(message) -> None:
 
 
 async def telegram_webhook() -> NoReturn:
-    global application
+    global telegram_application
 
-    application.add_handler(CommandHandler(MeowCommand.PETROL.value, telegram_petrol))
-    application.add_handler(CommandHandler(MeowCommand.SAY.value, telegram_say))
-    application.add_handler(CommandHandler(MeowCommand.FACT.value, telegram_fact))
-    application.add_handler(MessageHandler(filters.TEXT, telegram_filter))
+    telegram_application.add_handler(
+        CommandHandler(MeowCommand.PETROL.value, telegram_petrol)
+    )
+    telegram_application.add_handler(
+        CommandHandler(MeowCommand.SAY.value, telegram_say)
+    )
+    telegram_application.add_handler(
+        CommandHandler(MeowCommand.FACT.value, telegram_fact)
+    )
+    telegram_application.add_handler(MessageHandler(filters.TEXT, telegram_filter))
 
-    await application.bot.set_webhook(
+    await telegram_application.bot.set_webhook(
         f'{os.environ["WEBHOOK_URL"]}/telegram',
         allowed_updates=Update.ALL_TYPES,
         secret_token=SECRET_TOKEN,
     )
 
     try:
-        async with application:
-            await application.start()
+        async with telegram_application:
+            await telegram_application.start()
             logger.info("Telegram bot is started")
 
             while True:
                 await asyncio.sleep(3600)
 
     except (RuntimeError, asyncio.CancelledError):
-        if application.running:
+        if telegram_application.running:
             logger.info("Stopping telegram bot")
-            await application.stop()
+            await telegram_application.stop()
 
             logger.info("Telegram bot is terminated")
 
@@ -373,76 +380,6 @@ async def telegram_filter(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
 
 
-@routes.get("/")
-async def hello(request: web.Request) -> web.Response:
-    return web.Response(text="Hello, world")
-
-
-@routes.get(f"/{SECRET_PING}")
-async def pong(request: web.Request) -> web.Response:
-    return web.Response(text="pong")
-
-
-@routes.post("/telegram")
-async def web_telegram(request: web.Request) -> web.Response:
-    global application
-
-    assert SECRET_TOKEN == request.headers["X-Telegram-Bot-Api-Secret-Token"]
-
-    logger.info("Webhook received a request")
-    await application.update_queue.put(
-        Update.de_json(await request.json(), application.bot)
-    )
-
-    return web.Response()
-
-
-def web_init() -> web.Application:
-    global routes
-
-    application = web.Application()
-    application.add_routes(routes)
-
-    return application
-
-
-async def web_run(application: web.Application) -> NoReturn:
-    web_runner = web.AppRunner(application)
-    await web_runner.setup()
-
-    web_site = web.TCPSite(web_runner, port=8080)
-    await web_site.start()
-
-    logger.info("Ready to receive webhook requests", url=os.environ["WEBHOOK_URL"])
-
-    try:
-        async with ClientSession() as session:
-            while True:
-                if not await web_check(session):
-                    await web_site.stop()
-                    await web_runner.cleanup()
-                    break
-
-                await asyncio.sleep(3600)
-    except asyncio.CancelledError:
-        logger.info("Shutting down web server")
-        await web_site.stop()
-        await web_runner.cleanup()
-
-        logger.info("Web server is terminated")
-
-
-async def web_check(session: ClientSession) -> bool:
-    result, ping_url = False, f'{os.environ["WEBHOOK_URL"]}/{SECRET_PING}'
-
-    async with session.get(ping_url) as response:
-        if response.status == 200 and (await response.text()).strip() == "pong":
-            logger.info("Webhook is online", ping_url=ping_url)
-            result = True
-
-    return result
-
-
 async def shutdown_handler(tasks, loop: asyncio.AbstractEventLoop) -> None:
     for task in tasks:
         if task is not asyncio.current_task():
@@ -450,13 +387,11 @@ async def shutdown_handler(tasks, loop: asyncio.AbstractEventLoop) -> None:
 
 
 async def main(loop: asyncio.AbstractEventLoop) -> None:
-    global client
-
     async with asyncio.TaskGroup() as tg:
         tasks = [
             tg.create_task(telegram_webhook()),
-            tg.create_task(web_run(web_init())),
             tg.create_task(discord_run()),
+            tg.create_task(web_run(web_init(telegram_application, SECRET_TOKEN))),
         ]
 
         for s in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):
