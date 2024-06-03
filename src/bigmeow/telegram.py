@@ -48,7 +48,7 @@ async def telegram_run() -> NoReturn:
             if not os.environ.get("DEBUG", "False").upper() == "TRUE":
                 logger.info(
                     "TELEGRAM: Sending up message to owner",
-                    chat_id=os.environ["TELEGRAM_CHAT"],
+                    chat_id=os.environ["TELEGRAM_USER"],
                 )
                 await application.bot.send_message(
                     chat_id=os.environ["TELEGRAM_USER"],
