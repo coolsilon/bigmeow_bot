@@ -79,7 +79,7 @@ async def on_message(message) -> None:
 async def on_ready() -> None:
     global client
 
-    if not bool(os.environ.get("DEBUG", "False")):
+    if not os.environ.get("DEBUG", "False") == "TRUE":
         user = await client.fetch_user(int(os.environ["DISCORD_USER"]))
 
         logger.info("DISCORD: Sending up message to owner")
