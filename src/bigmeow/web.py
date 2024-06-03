@@ -51,7 +51,7 @@ def web_init(telegram_application: Application) -> web.Application:
 
 
 async def web_run(web_application: web.Application) -> NoReturn:
-    logger.info("WEBHOOK: starting", url=os.environ["WEBHOOK_URL"])
+    logger.info("WEBHOOK: Starting", url=os.environ["WEBHOOK_URL"])
     web_runner = web.AppRunner(web_application)
     await web_runner.setup()
 
@@ -69,11 +69,11 @@ async def web_run(web_application: web.Application) -> NoReturn:
 
                 await asyncio.sleep(3600)
     except asyncio.CancelledError:
-        logger.info("WEBHOOK: stopping")
+        logger.info("WEBHOOK: Stopping")
         await web_site.stop()
         await web_runner.cleanup()
 
-        logger.info("WEBHOOK: stopped")
+        logger.info("WEBHOOK: Stopped")
 
 
 async def web_check(session: ClientSession) -> bool:
