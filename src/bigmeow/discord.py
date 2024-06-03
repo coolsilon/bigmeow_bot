@@ -84,4 +84,4 @@ async def on_ready() -> None:
 
         logger.info("DISCORD: Sending up message to owner")
         if client.user:
-            await user.send(meow_say(f"Bot {client.user.mention} is up"))
+            await user.send(f"Bot {client.user.mention} is up\n{meow_say('Hello~')}")
