@@ -82,6 +82,8 @@ async def on_ready() -> None:
     if not os.environ.get("DEBUG", "False") == "TRUE":
         user = await client.fetch_user(int(os.environ["DISCORD_USER"]))
 
-        logger.info("DISCORD: Sending up message to owner")
+        logger.info(
+            "DISCORD: Sending up message to owner", user=os.environ["DISCORD_USER"]
+        )
         if client.user:
             await user.send(f"Bot {client.user.mention} is up\n{meow_say('Hello~')}")

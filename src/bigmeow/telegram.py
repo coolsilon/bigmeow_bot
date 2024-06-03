@@ -52,7 +52,7 @@ async def telegram_run() -> NoReturn:
                 await application.bot.send_message(
                     chat_id=os.environ["TELEGRAM_USER"],
                     parse_mode=ParseMode.MARKDOWN,
-                    text=f"Bot @{(await application.bot.get_me()).username} is up\n{meow_say('Hello~')}",
+                    text=meow_say("Bot is up"),
                 )
 
             while True:
