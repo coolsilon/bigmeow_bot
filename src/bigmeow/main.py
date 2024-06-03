@@ -27,6 +27,10 @@ import bigmeow.settings as settings
 from bigmeow.settings import Change, Latest, Level, MeowCommand
 from bigmeow.web import web_init, web_run
 
+load_dotenv()
+
+logger = structlog.get_logger()
+
 
 def discord_init_client() -> discord.Client:
     intents = discord.Intents.default()
@@ -38,21 +42,17 @@ async def discord_run():
     global discord_client
 
     try:
+        logger.info("DISCORD: starting")
         await discord_client.start(os.environ["DISCORD_TOKEN"])
-        logger.info("Discord bot is running")
 
     except asyncio.CancelledError:
         if not discord_client.is_closed():
-            logger.info("Stopping discord bot")
+            logger.info("DISCORD: stopping")
             await discord_client.close()
 
-            logger.info("Discord bot is terminated")
+            logger.info("DISCORD: stopped")
 
 
-load_dotenv()
-
-
-logger = structlog.get_logger()
 discord_client = discord_init_client()
 telegram_application = ApplicationBuilder().token(os.environ["TELEGRAM_TOKEN"]).build()
 
@@ -70,7 +70,10 @@ def meowpetrol_update_latest(current: Latest, incoming: Level | Change) -> Lates
 
 
 async def meow_fact(session: ClientSession) -> str:
-    async with session.get("https://meowfacts.herokuapp.com/") as response:
+    url = "https://meowfacts.herokuapp.com/"
+
+    logger.info("FETCHING: Cat fact", url="https://meowfacts.herokuapp.com/")
+    async with session.get(url) as response:
         response_data = await response.json()
 
         async with settings.fact_lock:
@@ -84,11 +87,12 @@ async def meow_fact(session: ClientSession) -> str:
 
 
 async def meowpetrol_fetch_price(session: ClientSession) -> AsyncGenerator[str, None]:
+    url = "https://storage.data.gov.my/commodities/fuelprice.csv"
+
     async with settings.latest_lock:
         if (settings.latest_cache.level.date + timedelta(days=6)) < date.today():
-            async with session.get(
-                "https://storage.data.gov.my/commodities/fuelprice.csv"
-            ) as response:
+            logger.info("FETCHING: Fuel price", url=url)
+            async with session.get(url) as response:
                 settings.latest_cache = reduce(
                     meowpetrol_update_latest,
                     [
@@ -110,7 +114,7 @@ async def meowpetrol_fetch_price(session: ClientSession) -> AsyncGenerator[str, 
                     settings.latest_cache,
                 )
 
-        yield "Data sourced from https://storage.data.gov.my/commodities/fuelprice.csv"
+        yield f"Data sourced from {url}"
 
         yield (
             f"From {settings.latest_cache.level.date.strftime(settings.DATE_FORMAT)} to "
@@ -130,9 +134,10 @@ async def meowpetrol_fetch_price(session: ClientSession) -> AsyncGenerator[str, 
 
 
 async def meow_fetch_photo(session: ClientSession) -> BytesIO:
-    async with session.get("https://cataas.com/cat/says/meow?type=square") as response:
-        logger.info("Fetching cat photo from cataas.com")
+    url = "https://cataas.com/cat/says/meow?type=square"
 
+    logger.info("FETCHING: Cat photo", url=url)
+    async with session.get(url) as response:
         async with settings.cat_lock:
             return (
                 settings.cat_cache.cache(BytesIO(await response.read()))
@@ -202,18 +207,18 @@ async def telegram_webhook() -> NoReturn:
 
     try:
         async with telegram_application:
+            logger.info("TELEGRAM: starting")
             await telegram_application.start()
-            logger.info("Telegram bot is started")
 
             while True:
                 await asyncio.sleep(3600)
 
     except (RuntimeError, asyncio.CancelledError):
         if telegram_application.running:
-            logger.info("Stopping telegram bot")
+            logger.info("TELEGRAM: stopping")
             await telegram_application.stop()
 
-            logger.info("Telegram bot is terminated")
+            logger.info("TELEGRAM: stopped")
 
 
 async def telegram_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

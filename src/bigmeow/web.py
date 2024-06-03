@@ -5,12 +5,15 @@ from typing import NoReturn
 
 import structlog
 from aiohttp import ClientSession, web
+from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application
 
 import bigmeow.settings as settings
 
-logger = structlog.getLogger()
+load_dotenv()
+
+logger = structlog.get_logger()
 
 SECRET_PING = secrets.token_hex(128)
 
@@ -34,10 +37,10 @@ def web_init(telegram_application: Application) -> web.Application:
             settings.SECRET_TOKEN == request.headers["X-Telegram-Bot-Api-Secret-Token"]
         )
 
-        logger.info("Webhook received a request")
-        await telegram_application.update_queue.put(
-            Update.de_json(await request.json(), telegram_application.bot)
-        )
+        update = Update.de_json(await request.json(), telegram_application.bot)
+
+        logger.info("INCOMING: Webhook receives a telegram request", update=update)
+        await telegram_application.update_queue.put(update)
 
         return web.Response()
 
@@ -48,13 +51,13 @@ def web_init(telegram_application: Application) -> web.Application:
 
 
 async def web_run(web_application: web.Application) -> NoReturn:
+    logger.info("WEBHOOK: starting", url=os.environ["WEBHOOK_URL"])
     web_runner = web.AppRunner(web_application)
     await web_runner.setup()
 
     web_site = web.TCPSite(web_runner, port=8080)
     await web_site.start()
 
-    logger.info("Ready to receive webhook requests", url=os.environ["WEBHOOK_URL"])
 
     try:
         async with ClientSession() as session:
@@ -66,11 +69,11 @@ async def web_run(web_application: web.Application) -> NoReturn:
 
                 await asyncio.sleep(3600)
     except asyncio.CancelledError:
-        logger.info("Shutting down web server")
+        logger.info("WEBHOOK: stopping")
         await web_site.stop()
         await web_runner.cleanup()
 
-        logger.info("Web server is terminated")
+        logger.info("WEBHOOK: stopped")
 
 
 async def web_check(session: ClientSession) -> bool:
@@ -78,7 +81,7 @@ async def web_check(session: ClientSession) -> bool:
 
     async with session.get(ping_url) as response:
         if response.status == 200 and (await response.text()).strip() == "pong":
-            logger.info("Webhook is online", ping_url=ping_url)
+            logger.info("WEBHOOK: website is up", ping_url=ping_url)
             result = True
 
     return result

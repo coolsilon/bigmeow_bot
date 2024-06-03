@@ -8,7 +8,7 @@ from typing import NamedTuple
 
 import structlog
 
-logger = structlog.getLogger()
+logger = structlog.get_logger()
 
 
 # TODO use proper typing and abstrct to abstract class in py3.12
@@ -16,7 +16,7 @@ class Cat_Cache:
     cat_list: list[BytesIO] = []
 
     def cache(self, cat: BytesIO) -> BytesIO:
-        logger.info("Storing a cat into the cache")
+        logger.info("CAT_CACHE: Storing a new photo to cache")
 
         if len(self.cat_list) > CACHE_LIMIT:
             self.cat_list[randint(0, CACHE_LIMIT - 1)] = cat
@@ -30,7 +30,7 @@ class Cat_Cache:
     def get(self) -> BytesIO:
         assert len(self.cat_list) > 0
 
-        logger.info("Fetching a cat from cache")
+        logger.info("CAT_CACHE: Retrieve a photo")
         return choice(self.cat_list)
 
 
@@ -38,7 +38,7 @@ class Fact_Cache:
     fact_list: list[str] = []
 
     def cache(self, fact: str) -> str:
-        logger.info("Storing a fact into the cache")
+        logger.info("FACT_CACHE: Storing a new fact to cache")
 
         if len(self.fact_list) > CACHE_LIMIT:
             self.fact_list[randint(0, CACHE_LIMIT - 1)] = fact
@@ -52,7 +52,7 @@ class Fact_Cache:
     def get(self) -> str:
         assert len(self.fact_list) > 0
 
-        logger.info("Fetching a fact from cache")
+        logger.info("FACT_CACHE: Retrieve a fact")
         return choice(self.fact_list)
 
 
