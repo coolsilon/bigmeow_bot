@@ -4,7 +4,7 @@ import secrets
 from typing import NoReturn
 
 import structlog
-from aiohttp import ClientSession, web
+from aiohttp import BasicAuth, ClientSession, web
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application
@@ -16,6 +16,23 @@ load_dotenv()
 logger = structlog.get_logger()
 
 SECRET_PING = secrets.token_hex(128)
+SECRET_PING_USER = "BigMeow"
+
+secret_ping_password = None
+
+
+def check_login(authorization: str | None) -> bool:
+    global SECRET_PING_USER, secret_ping_password
+
+    result = False
+
+    if authorization:
+        auth = BasicAuth.decode(authorization)
+        result = auth.login == SECRET_PING_USER and (
+            auth.password == secret_ping_password
+        )
+
+    return result
 
 
 def web_init(telegram_application: Application) -> web.Application:
@@ -27,6 +44,8 @@ def web_init(telegram_application: Application) -> web.Application:
 
     @routes.get(f"/{SECRET_PING}")
     async def pong(request: web.Request) -> web.Response:
+        assert check_login(request.headers.get("Authorization"))  # auth check
+
         return web.Response(text="pong")
 
     @routes.post("/telegram")
@@ -80,9 +99,14 @@ async def web_run(application: web.Application) -> NoReturn:
 
 
 async def web_check(session: ClientSession) -> bool:
-    result, ping_url = False, f'{os.environ["WEBHOOK_URL"]}/{SECRET_PING}'
+    global SECRET_PING_USER, secret_ping_password
 
-    async with session.get(ping_url) as response:
+    result, ping_url = False, f'{os.environ["WEBHOOK_URL"]}/{SECRET_PING}'
+    secret_ping_password = secrets.token_hex(128)
+
+    async with session.get(
+        ping_url, auth=BasicAuth(SECRET_PING_USER, secret_ping_password)
+    ) as response:
         if response.status == 200 and (await response.text()).strip() == "pong":
             logger.info("WEBHOOK: Website is up", ping_url=ping_url)
             result = True

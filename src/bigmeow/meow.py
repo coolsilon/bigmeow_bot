@@ -26,7 +26,7 @@ def meow_sayify(func: Callable) -> Callable:
 def meowpetrol_update_latest(current: Latest, incoming: Level | Change) -> Latest:
     field = None
 
-    if isinstance(incoming, settings.Level):
+    if isinstance(incoming, Level):
         if incoming.date > current.level.date:
             field = "level"
     else:
