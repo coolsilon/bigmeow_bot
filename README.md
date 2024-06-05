@@ -44,5 +44,5 @@ $ poetry install
 Then run it with
 
 ```
-$ poetry run python -m bigmeow.index
+$ poetry run python -m bigmeow.main
 ```

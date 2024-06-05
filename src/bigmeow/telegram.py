@@ -1,6 +1,5 @@
 import asyncio
 import os
-from typing import NoReturn
 
 import structlog
 from aiohttp import ClientSession
@@ -25,7 +24,7 @@ logger = structlog.get_logger()
 application = ApplicationBuilder().token(os.environ["TELEGRAM_TOKEN"]).build()
 
 
-async def telegram_run(exit_event: asyncio.Event) -> NoReturn:
+async def telegram_run(exit_event: asyncio.Event) -> None:
     global application
 
     application.add_handler(CommandHandler(MeowCommand.PETROL.value, telegram_petrol))

@@ -1,7 +1,6 @@
 import asyncio
 import os
 import secrets
-from typing import NoReturn
 
 import structlog
 from aiohttp import BasicAuth, ClientSession, web
@@ -69,7 +68,7 @@ def web_init(telegram_application: Application) -> web.Application:
     return application
 
 
-async def web_run(exit_event: asyncio.Event, application: web.Application) -> NoReturn:
+async def web_run(exit_event: asyncio.Event, application: web.Application) -> None:
     logger.info("WEBHOOK: Starting", url=os.environ["WEBHOOK_URL"])
     web_runner = web.AppRunner(application)
     await web_runner.setup()
