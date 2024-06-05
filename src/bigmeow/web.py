@@ -59,7 +59,7 @@ def web_init(telegram_application: Application) -> web.Application:
         update = Update.de_json(await request.json(), telegram_application.bot)
 
         logger.info("INCOMING: Webhook receives a telegram request", update=update)
-        await telegram_application.update_queue.put(update)
+        asyncio.create_task(telegram_application.update_queue.put(update))
 
         return web.Response()
 
@@ -69,7 +69,7 @@ def web_init(telegram_application: Application) -> web.Application:
     return application
 
 
-async def web_run(application: web.Application) -> NoReturn:
+async def web_run(exit_event: asyncio.Event, application: web.Application) -> NoReturn:
     logger.info("WEBHOOK: Starting", url=os.environ["WEBHOOK_URL"])
     web_runner = web.AppRunner(application)
     await web_runner.setup()
@@ -77,25 +77,20 @@ async def web_run(application: web.Application) -> NoReturn:
     web_site = web.TCPSite(web_runner, port=8080)
     await web_site.start()
 
+    async with ClientSession() as session:
+        if not await web_check(session):
+            logger.error("WEBHOOK: Webhook is unreachable, stopping")
 
-    try:
-        async with ClientSession() as session:
-            while True:
-                if not await web_check(session):
-                    logger.error("WEBHOOK: Website is not up, stopping")
-                    await web_site.stop()
-                    await web_runner.cleanup()
+            await web_site.stop()
+            await web_runner.cleanup()
+            raise Exception("Webhook is unreachable")
 
-                    logger.error("WEBHOOK: Stopped")
-                    break
+        else:
+            await exit_event.wait()
 
-                await asyncio.sleep(3600)
-    except asyncio.CancelledError:
-        logger.info("WEBHOOK: Stopping")
-        await web_site.stop()
-        await web_runner.cleanup()
-
-        logger.info("WEBHOOK: Stopped")
+            logger.info("WEBHOOK: Stopping")
+            await web_site.stop()
+            await web_runner.cleanup()
 
 
 async def web_check(session: ClientSession) -> bool:

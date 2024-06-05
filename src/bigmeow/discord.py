@@ -29,19 +29,16 @@ def discord_init_client() -> discord.Client:
 client = discord_init_client()
 
 
-async def discord_run():
+async def discord_run(exit_event: asyncio.Event):
     global client
 
-    try:
-        logger.info("DISCORD: Starting")
-        await client.start(os.environ["DISCORD_TOKEN"])
+    logger.info("DISCORD: Starting")
+    asyncio.create_task(client.start(os.environ["DISCORD_TOKEN"]))
 
-    except asyncio.CancelledError:
-        if not client.is_closed():
-            logger.info("DISCORD: Stopping")
-            await client.close()
+    await exit_event.wait()
 
-            logger.info("DISCORD: Stopped")
+    logger.info("DISCORD: Stopping")
+    await client.close()
 
 
 @client.event
@@ -52,38 +49,45 @@ async def on_message(message) -> None:
     async with ClientSession() as session:
         if message.content.startswith(str(MeowCommand.PETROL)):
             logger.info(message)
-            await message.channel.send(await meow_petrol(session))
+            asyncio.create_task(message.channel.send(await meow_petrol(session)))
 
         elif message.content.startswith(str(MeowCommand.SAY)):
             logger.info(message)
-            await message.channel.send(
-                meow_say(message.content.replace(str(MeowCommand.SAY), "").strip())
+            asyncio.create_task(
+                message.channel.send(
+                    meow_say(message.content.replace(str(MeowCommand.SAY), "").strip())
+                )
             )
 
         elif message.content.startswith(str(MeowCommand.FACT)):
             logger.info(message)
-            await message.channel.send(await meow_fact(session))
+            asyncio.create_task(message.channel.send(await meow_fact(session)))
 
         elif "meow" in message.content.lower():
             logger.info(message)
-            await message.channel.send(
-                "photo from https://cataas.com/",
-                file=discord.File(
-                    await meow_fetch_photo(session),
-                    description="photo from https://cataas.com/",
-                    filename="meow.png",
-                ),
+            asyncio.create_task(
+                message.channel.send(
+                    "photo from https://cataas.com/",
+                    file=discord.File(
+                        await meow_fetch_photo(session),
+                        description="photo from https://cataas.com/",
+                        filename="meow.png",
+                    ),
+                )
             )
+
 
 @client.event
 async def on_ready() -> None:
     global client
 
-    if not os.environ.get("DEBUG", "False") == "TRUE":
+    if not os.environ.get("DEBUG", "False").upper() == "TRUE":
         user = await client.fetch_user(int(os.environ["DISCORD_USER"]))
 
         logger.info(
             "DISCORD: Sending up message to owner", user=os.environ["DISCORD_USER"]
         )
         if client.user:
-            await user.send(f"Bot {client.user.mention} is up\n{meow_say('Hello~')}")
+            asyncio.create_task(
+                user.send(f"Bot {client.user.mention} is up\n{meow_say('Hello~')}")
+            )

@@ -1,5 +1,7 @@
 import asyncio
 import signal
+from functools import partial
+from typing import Any
 
 import structlog
 from dotenv import load_dotenv
@@ -14,26 +16,53 @@ load_dotenv()
 logger = structlog.get_logger()
 
 
-async def shutdown_handler(tasks, loop: asyncio.AbstractEventLoop) -> None:
+def exception_handler(
+    loop: asyncio.AbstractEventLoop, context: dict[str, Any], exit_event: asyncio.Event
+) -> None:
+    message = context.get("exception", context["message"])
+    logger.error("Caught exception", message=message)
+
+    logger.error("MAIN: Shutting down")
+    asyncio.create_task(shutdown_handler(loop, exit_event))
+
+
+async def shutdown_handler(
+    loop: asyncio.AbstractEventLoop, exit_event: asyncio.Event
+) -> None:
+    logger.info("MAIN: Sending exit event")
+    exit_event.set()
+
+    await asyncio.sleep(5)
+
+    tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+
     for task in tasks:
-        if task is not asyncio.current_task():
-            task.cancel()
+        task.cancel()
+
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+    loop.stop()
 
 
-async def main(loop: asyncio.AbstractEventLoop) -> None:
-    async with asyncio.TaskGroup() as tg:
-        tasks = [
-            tg.create_task(telegram_run()),
-            tg.create_task(discord_run()),
-            tg.create_task(web_run(web_init(telegram.application))),
-        ]
+def main() -> None:
+    loop, exit_event = asyncio.get_event_loop(), asyncio.Event()
 
-        for s in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(
-                s, lambda: asyncio.create_task(shutdown_handler(tasks, loop))
-            )
+    loop.set_exception_handler(partial(exception_handler, exit_event=exit_event))
+
+    for s in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(
+            s,
+            lambda: asyncio.create_task(shutdown_handler(loop, exit_event)),
+        )
+
+    try:
+        loop.create_task(telegram_run(exit_event))
+        loop.create_task(discord_run(exit_event))
+        loop.create_task(web_run(exit_event, web_init(telegram.application)))
+        loop.run_forever()
+    finally:
+        loop.close()
 
 
 if __name__ == "__main__":
-    with asyncio.Runner() as runner:
-        runner.run(main(runner.get_loop()))
+    main()

@@ -83,23 +83,6 @@ async def meow_petrol(session: ClientSession) -> str:
                     settings.latest_cache,
                 )
 
-        logger.info(
-            (
-                f"Data sourced from {url}",
-                f"From {settings.latest_cache.level.date.strftime(settings.DATE_FORMAT)} to "
-                f"{(settings.latest_cache.level.date + timedelta(days=6)).strftime(settings.DATE_FORMAT)}",
-            )
-            + tuple(
-                "Price of {} is RM {} per litre ({} from last week)".format(
-                    {"ron95": "RON 95", "ron97": "RON 97", "diesel": "diesel"}.get(
-                        field
-                    ),
-                    getattr(settings.latest_cache.level, field),
-                    "{:+0.2f}".format(getattr(settings.latest_cache.change, field)),
-                )
-                for field in ("ron95", "ron97", "diesel")
-            )
-        )
         return "\n\n".join(
             (
                 f"Data sourced from {url}",
