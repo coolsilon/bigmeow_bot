@@ -1,10 +1,14 @@
+import asyncio
+import contextlib
+import queue
 import secrets
-from asyncio import Lock, Queue
+import threading
 from datetime import date
 from enum import Enum
+from functools import partial
 from io import BytesIO
 from random import choice, randint, shuffle
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import structlog
 
@@ -32,6 +36,65 @@ class Cat_Cache:
 
         logger.info("CAT_CACHE: Retrieve a photo")
         return choice(self.cat_list)
+
+
+class Event(threading.Event):
+    async def wait(self, timeout: int | None = 5) -> bool:
+        while True:
+            task = asyncio.get_event_loop().run_in_executor(
+                None, partial(super().wait, timeout)
+            )
+            await task
+
+            if result := task.result():
+                return result
+
+
+class Queue(queue.Queue):
+    async def put(
+        self, item: dict[Any, Any], block: bool = True, timeout: int | None = None
+    ) -> None:
+        task = asyncio.get_event_loop().run_in_executor(
+            None, partial(super().put, item, block, timeout)
+        )
+        await task
+
+        return task.result()
+
+    async def get(self, block: bool = True, timeout: int | None = 5) -> dict[Any, Any]:
+        while True:
+            task = asyncio.get_event_loop().run_in_executor(
+                None, partial(super().get, block, timeout)
+            )
+
+            with contextlib.suppress(queue.Empty):
+                await task
+
+            if task.done() and task.exception() is None:
+                return task.result()
+
+
+class Lock(contextlib.AbstractAsyncContextManager):
+    def __init__(self, lock: threading.Lock) -> None:
+        self.lock = lock
+
+    async def __aenter__(self) -> None:
+        await self.acquire()
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        return self.release()
+
+    async def acquire(self) -> bool:
+        task = asyncio.get_event_loop().run_in_executor(None, self.lock.acquire)
+        await task
+
+        return task.result()
+
+    def release(self) -> None:
+        self.lock.release()
+
+    def locked(self) -> bool:
+        return self.lock.locked()
 
 
 class Fact_Cache:
@@ -92,15 +155,15 @@ class MeowCommand(Enum):
         return f"{COMMAND_PREFIX}{self.value}"
 
 
-cat_cache, cat_lock = Cat_Cache(), Lock()
-fact_cache, fact_lock = Fact_Cache(), Lock()
+cat_cache, cat_lock = Cat_Cache(), asyncio.Lock()
+fact_cache, fact_lock = Fact_Cache(), asyncio.Lock()
 latest_cache, latest_lock = (
     Latest(Level(date.min, 0, 0, 0), Change(date.min, 0, 0, 0)),
-    Lock(),
+    asyncio.Lock(),
 )
 
 CACHE_LIMIT = 5
 DATE_FORMAT = "%d/%m/%Y"
 SECRET_TOKEN = secrets.token_hex(128)
 
-telegram_queue = Queue()
+telegram_queue = asyncio.Queue()

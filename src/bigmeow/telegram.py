@@ -1,6 +1,5 @@
 import asyncio
 import os
-from typing import Any
 
 import structlog
 from aiohttp import ClientSession
@@ -100,7 +99,7 @@ async def queue_consume() -> None:
         )
 
 
-async def run(exit_event: asyncio.Event) -> None:
+async def run(exit_event: asyncio.Event | settings.Event) -> None:
     global application
 
     application.add_handler(CommandHandler(MeowCommand.PETROL.value, petrol_fetch))

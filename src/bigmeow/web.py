@@ -33,7 +33,7 @@ def check_login_is_valid(authorization: str | None) -> bool:
     return result
 
 
-async def run(exit_event: asyncio.Event) -> None:
+async def run(exit_event: asyncio.Event | settings.Event) -> None:
     global routes
 
     application = web.Application()
@@ -76,6 +76,7 @@ async def web_check(session: ClientSession) -> bool:
             result = True
 
     return result
+
 
 #
 # routes

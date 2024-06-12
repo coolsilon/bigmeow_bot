@@ -6,6 +6,7 @@ import structlog
 from aiohttp import ClientSession
 from dotenv import load_dotenv
 
+import bigmeow.settings as settings
 from bigmeow.meow import (
     meow_fact,
     meow_fetch_photo,
@@ -29,7 +30,7 @@ def client_init() -> discord.Client:
 client = client_init()
 
 
-async def run(exit_event: asyncio.Event) -> None:
+async def run(exit_event: asyncio.Event | settings.Event) -> None:
     global client
 
     logger.info("DISCORD: Starting")
