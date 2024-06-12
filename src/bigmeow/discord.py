@@ -18,7 +18,7 @@ load_dotenv()
 logger = structlog.get_logger()
 
 
-def discord_init_client() -> discord.Client:
+def client_init() -> discord.Client:
     intents = discord.Intents.default()
     intents.messages = True
     intents.message_content = True
@@ -26,10 +26,10 @@ def discord_init_client() -> discord.Client:
     return discord.Client(intents=discord.Intents(messages=True, message_content=True))
 
 
-client = discord_init_client()
+client = client_init()
 
 
-async def discord_run(exit_event: asyncio.Event):
+async def run(exit_event: asyncio.Event) -> None:
     global client
 
     logger.info("DISCORD: Starting")

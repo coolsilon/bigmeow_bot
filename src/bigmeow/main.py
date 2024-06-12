@@ -6,10 +6,9 @@ from typing import Any
 import structlog
 from dotenv import load_dotenv
 
-import bigmeow.telegram as telegram
-from bigmeow.discord import discord_run
-from bigmeow.telegram import telegram_run
-from bigmeow.web import web_init, web_run
+from bigmeow.discord import run as discord_run
+from bigmeow.telegram import run as telegram_run
+from bigmeow.web import run as web_run
 
 load_dotenv()
 
@@ -58,7 +57,7 @@ def main() -> None:
     try:
         loop.create_task(telegram_run(exit_event))
         loop.create_task(discord_run(exit_event))
-        loop.create_task(web_run(exit_event, web_init(telegram.application)))
+        loop.create_task(web_run(exit_event))
         loop.run_forever()
     finally:
         loop.close()

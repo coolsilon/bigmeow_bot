@@ -5,10 +5,9 @@ import secrets
 import structlog
 from aiohttp import BasicAuth, ClientSession, web
 from dotenv import load_dotenv
-from telegram import Update
-from telegram.ext import Application
 
 import bigmeow.settings as settings
+from bigmeow.telegram import queue
 
 load_dotenv()
 
@@ -18,9 +17,10 @@ SECRET_PING = secrets.token_hex(128)
 SECRET_PING_USER = "BigMeow"
 
 secret_ping_password = None
+routes = web.RouteTableDef()
 
 
-def check_login(authorization: str | None) -> bool:
+def check_login_is_valid(authorization: str | None) -> bool:
     global SECRET_PING_USER, secret_ping_password
 
     result = False
@@ -34,41 +34,12 @@ def check_login(authorization: str | None) -> bool:
     return result
 
 
-def web_init(telegram_application: Application) -> web.Application:
-    routes = web.RouteTableDef()
-
-    @routes.get("/")
-    async def hello(request: web.Request) -> web.Response:
-        return web.Response(text="Hello, world")
-
-    @routes.get(f"/{SECRET_PING}")
-    async def pong(request: web.Request) -> web.Response:
-        assert check_login(request.headers.get("Authorization"))  # auth check
-
-        return web.Response(text="pong")
-
-    @routes.post("/telegram")
-    async def web_telegram(request: web.Request) -> web.Response:
-        nonlocal telegram_application
-
-        assert (
-            settings.SECRET_TOKEN == request.headers["X-Telegram-Bot-Api-Secret-Token"]
-        )
-
-        update = Update.de_json(await request.json(), telegram_application.bot)
-
-        logger.info("INCOMING: Webhook receives a telegram request", update=update)
-        asyncio.create_task(telegram_application.update_queue.put(update))
-
-        return web.Response()
+async def run(exit_event: asyncio.Event) -> None:
+    global routes
 
     application = web.Application()
     application.add_routes(routes)
 
-    return application
-
-
-async def web_run(exit_event: asyncio.Event, application: web.Application) -> None:
     logger.info("WEBHOOK: Starting", url=os.environ["WEBHOOK_URL"])
     web_runner = web.AppRunner(application)
     await web_runner.setup()
@@ -106,3 +77,29 @@ async def web_check(session: ClientSession) -> bool:
             result = True
 
     return result
+
+#
+# routes
+#
+
+
+@routes.get("/")
+async def index_get(request: web.Request) -> web.Response:
+    return web.Response(text="Hello, world")
+
+
+@routes.get(f"/{SECRET_PING}")
+async def pong_get(request: web.Request) -> web.Response:
+    assert check_login_is_valid(request.headers.get("Authorization"))  # auth check
+
+    return web.Response(text="pong")
+
+
+@routes.post("/telegram")
+async def telegram_post(request: web.Request) -> web.Response:
+    assert settings.SECRET_TOKEN == request.headers["X-Telegram-Bot-Api-Secret-Token"]
+
+    logger.info("WEBHOOK: Webhook receives a telegram request")
+    asyncio.create_task(queue(await request.json()))
+
+    return web.Response()
