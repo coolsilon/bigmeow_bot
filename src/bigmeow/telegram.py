@@ -93,10 +93,11 @@ async def petrol_fetch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             )
 
 
-async def queue(update_dict: dict[Any, Any]) -> None:
-    asyncio.create_task(
-        application.update_queue.put(Update.de_json(update_dict, application.bot))
-    )
+async def queue_consume() -> None:
+    while update_dict := await settings.telegram_queue.get():
+        asyncio.create_task(
+            application.update_queue.put(Update.de_json(update_dict, application.bot))
+        )
 
 
 async def run(exit_event: asyncio.Event) -> None:
@@ -114,6 +115,8 @@ async def run(exit_event: asyncio.Event) -> None:
             secret_token=settings.SECRET_TOKEN,
         )
     )
+
+    asyncio.create_task(queue_consume())
 
     async with application:
         logger.info("TELEGRAM: Starting")

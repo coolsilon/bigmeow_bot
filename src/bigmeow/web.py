@@ -7,7 +7,6 @@ from aiohttp import BasicAuth, ClientSession, web
 from dotenv import load_dotenv
 
 import bigmeow.settings as settings
-from bigmeow.telegram import queue
 
 load_dotenv()
 
@@ -100,6 +99,6 @@ async def telegram_post(request: web.Request) -> web.Response:
     assert settings.SECRET_TOKEN == request.headers["X-Telegram-Bot-Api-Secret-Token"]
 
     logger.info("WEBHOOK: Webhook receives a telegram request")
-    asyncio.create_task(queue(await request.json()))
+    asyncio.create_task(settings.telegram_queue.put(await request.json()))
 
     return web.Response()

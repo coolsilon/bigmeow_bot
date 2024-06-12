@@ -1,5 +1,5 @@
 import secrets
-from asyncio import Lock
+from asyncio import Lock, Queue
 from datetime import date
 from enum import Enum
 from io import BytesIO
@@ -102,3 +102,5 @@ latest_cache, latest_lock = (
 CACHE_LIMIT = 5
 DATE_FORMAT = "%d/%m/%Y"
 SECRET_TOKEN = secrets.token_hex(128)
+
+telegram_queue = Queue()
