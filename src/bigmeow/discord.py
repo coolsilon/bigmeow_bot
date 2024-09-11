@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 import bigmeow.settings as settings
 from bigmeow.meow import (
+    meow_blockedornot,
     meow_fact,
     meow_fetch_photo,
     meow_petrol,
@@ -60,9 +61,31 @@ async def on_message(message) -> None:
                 )
             )
 
+        elif message.content.startswith(str(MeowCommand.THINK)):
+            logger.info(message)
+            asyncio.create_task(
+                message.channel.send(
+                    meow_say(
+                        message.content.replace(str(MeowCommand.THINK), "").strip(),
+                        is_cowthink=True,
+                    )
+                )
+            )
+
         elif message.content.startswith(str(MeowCommand.FACT)):
             logger.info(message)
             asyncio.create_task(message.channel.send(await meow_fact(session)))
+
+        elif message.content.startswith(str(MeowCommand.ISBLOCKED)):
+            logger.info(message)
+            asyncio.create_task(
+                message.channel.send(
+                    await meow_blockedornot(
+                        session,
+                        message.content.replace(str(MeowCommand.ISBLOCKED), "").strip(),
+                    )
+                )
+            )
 
         elif "meow" in message.content.lower():
             logger.info(message)

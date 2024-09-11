@@ -43,7 +43,7 @@ async def run(exit_event: asyncio.Event | settings.Event) -> None:
     web_runner = web.AppRunner(application)
     await web_runner.setup()
 
-    web_site = web.TCPSite(web_runner, port=8080)
+    web_site = web.TCPSite(web_runner, port=int(os.environ.get("WEBHOOK_PORT", "8080")))
     await web_site.start()
 
     async with ClientSession() as session:
