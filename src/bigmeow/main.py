@@ -21,7 +21,7 @@ logger = structlog.get_logger()
 
 def done_handler(task: Future, exit_event: settings.Event) -> None:
     if task.exception() is not None:
-        logger.error(str(task.exception()))
+        logger.exception(task.exception())
 
     shutdown_handler_threadpool(None, None, exit_event)
 
