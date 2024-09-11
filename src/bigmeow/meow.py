@@ -34,10 +34,10 @@ async def meow_blockedornot(session: ClientSession, query: str) -> str:
 
         response_data = await response.json()
 
-        if response_data["blocked"] and not response_data["different_ip"]:
+        if response_data["blocked"] and response_data["different_ip"]:
             result = [f"Website {query} is blocked."]
 
-        elif response_data["different_ip"]:
+        elif not response_data["blocked"] and response_data["different_ip"]:
             result = [f"Website {query} is likely safe."]
 
         if response_data["measurement"]:
