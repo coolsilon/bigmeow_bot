@@ -10,8 +10,10 @@ A dumb experimental bot done for no good reason
 ## What can BigMeow do?
 
 * `!meowsay message`: your message will be repeated by a cute cat.
+* `!meowthink message`: your message will be thought by a cute cat.
 * `!meowpetrol`: BigMeow will attempt to report the current petrol price in Malaysia, data from https://data.gov.my/data-catalogue/fuelprice
 * `!meowfact`: Return a meow fact from https://github.com/wh-iterabb-it/meowfacts
+* `!meowisblocked domain.tld`: Perform a query to https://blockedornot.sinarproject.org/ to check if a domain is blocked in Malaysia
 * If your message has a `meow` in it, a cat photo is fetched from https://cataas.com/
 
 NOTE: all `!` commands can be replaced by `/` in telegram, e.g. `/meowsay hello world`.
