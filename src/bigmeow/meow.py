@@ -7,7 +7,7 @@ from typing import Callable
 
 import structlog
 from aiohttp import ClientSession
-from cowsay import cowsay
+from cowsay import cowsay, cowthink
 from dotenv import load_dotenv
 
 from bigmeow import settings
@@ -16,11 +16,34 @@ from bigmeow.settings import Change, Latest, Level
 load_dotenv()
 logger = structlog.get_logger()
 
+
 def meow_sayify(func: Callable) -> Callable:
     async def wrapped_function(*args, **kwargs) -> str:
-        return meow_say(await func(*args, **kwargs))
+        return meow_say(await func(*args, **kwargs), wrap_text=False)
 
     return wrapped_function
+
+
+@meow_sayify
+async def meow_blockedornot(session: ClientSession, query: str) -> str:
+    url = "https://blockedornot.sinarproject.org/api/"
+
+    logger.info("MEOW: Fetching blocked query", url=url, query=query)
+    async with session.get(url, params={"query": query}) as response:
+        result = [f"Website {query} is safe."]
+
+        response_data = await response.json()
+
+        if response_data["blocked"] and not response_data["different_ip"]:
+            result = [f"Website {query} is blocked."]
+
+        elif response_data["different_ip"]:
+            result = [f"Website {query} is likely safe."]
+
+        if response_data["measurement"]:
+            result = result + [f"Measurement URL: {response_data['measurement']}"]
+
+        return "\n".join(result + ["Powered by https://blockedornot.sinarproject.org/"])
 
 
 def meowpetrol_update_latest(current: Latest, incoming: Level | Change) -> Latest:
@@ -40,7 +63,7 @@ def meowpetrol_update_latest(current: Latest, incoming: Level | Change) -> Lates
 async def meow_fact(session: ClientSession) -> str:
     url = "https://meowfacts.herokuapp.com/"
 
-    logger.info("MEOW: Fetching a cat fact", url="https://meowfacts.herokuapp.com/")
+    logger.info("MEOW: Fetching a cat fact", url=url)
     async with session.get(url) as response:
         response_data = await response.json()
 
@@ -115,7 +138,9 @@ async def meow_fetch_photo(session: ClientSession) -> BytesIO:
             )
 
 
-def meow_say(message: str) -> str:
+def meow_say(message: str, is_cowthink: bool = False, wrap_text: bool = True) -> str:
+    func = cowthink if is_cowthink else cowsay
+
     return "```\n{}\n```".format(
-        cowsay(message, cow=choice(["kitty", "hellokitty", "meow"]))
+        func(message, wrap_text=wrap_text, cow=choice(["kitty", "hellokitty", "meow"]))
     )

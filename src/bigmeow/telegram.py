@@ -15,13 +15,42 @@ from telegram.ext import (
 )
 
 import bigmeow.settings as settings
-from bigmeow.meow import meow_fact, meow_fetch_photo, meow_petrol, meow_say
+from bigmeow.meow import (
+    meow_blockedornot,
+    meow_fact,
+    meow_fetch_photo,
+    meow_petrol,
+    meow_say,
+)
 from bigmeow.settings import MeowCommand
 
 load_dotenv()
 
 logger = structlog.get_logger()
 application = ApplicationBuilder().token(os.environ["TELEGRAM_TOKEN"]).build()
+
+
+async def blockedornot_fetch(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    logger.info(update)
+
+    async with ClientSession() as session:
+        if update.message and update.message.text and update.effective_chat:
+            asyncio.create_task(
+                context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    parse_mode=ParseMode.MARKDOWN,
+                    text=await meow_blockedornot(
+                        session,
+                        update.message.text.replace(
+                            MeowCommand.ISBLOCKED.telegram(), ""
+                        )
+                        .replace(str(MeowCommand.ISBLOCKED), "")
+                        .strip(),
+                    ),
+                )
+            )
 
 
 async def fact_fetch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -51,6 +80,14 @@ async def message_filter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         elif (
             update.message
             and update.effective_chat
+            and str(MeowCommand.THINK) in (update.message.text or "")
+        ):
+            logger.info(update)
+            asyncio.create_task(think_create(update, context))
+
+        elif (
+            update.message
+            and update.effective_chat
             and str(MeowCommand.PETROL) in (update.message.text or "")
         ):
             logger.info(update)
@@ -63,6 +100,14 @@ async def message_filter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         ):
             logger.info(update)
             asyncio.create_task(fact_fetch(update, context))
+
+        elif (
+            update.message
+            and update.effective_chat
+            and str(MeowCommand.ISBLOCKED) in (update.message.text or "")
+        ):
+            logger.info(update)
+            asyncio.create_task(blockedornot_fetch(update, context))
 
         elif (
             update.message
@@ -104,7 +149,11 @@ async def run(exit_event: asyncio.Event | settings.Event) -> None:
 
     application.add_handler(CommandHandler(MeowCommand.PETROL.value, petrol_fetch))
     application.add_handler(CommandHandler(MeowCommand.SAY.value, say_create))
+    application.add_handler(CommandHandler(MeowCommand.THINK.value, say_create))
     application.add_handler(CommandHandler(MeowCommand.FACT.value, fact_fetch))
+    application.add_handler(
+        CommandHandler(MeowCommand.ISBLOCKED.value, blockedornot_fetch)
+    )
     application.add_handler(MessageHandler(filters.TEXT, message_filter))
 
     asyncio.create_task(
@@ -152,6 +201,24 @@ async def say_create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     update.message.text.replace(MeowCommand.SAY.telegram(), "")
                     .replace(str(MeowCommand.SAY), "")
                     .strip()
+                ),
+            )
+        )
+
+
+async def think_create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.info(update)
+
+    if update.message and update.message.text and update.effective_chat:
+        asyncio.create_task(
+            context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                parse_mode=ParseMode.MARKDOWN,
+                text=meow_say(
+                    update.message.text.replace(MeowCommand.SAY.telegram(), "")
+                    .replace(str(MeowCommand.SAY), "")
+                    .strip(),
+                    is_cowthink=True,
                 ),
             )
         )
