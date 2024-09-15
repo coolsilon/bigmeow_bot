@@ -169,4 +169,7 @@ CACHE_LIMIT = 5
 DATE_FORMAT = "%d/%m/%Y"
 SECRET_TOKEN = secrets.token_hex(128)
 
-telegram_queue = asyncio.Queue()
+telegram_updates = asyncio.Queue()
+
+telegram_messages = asyncio.Queue()
+discord_messages = asyncio.Queue()

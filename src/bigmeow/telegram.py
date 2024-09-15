@@ -1,5 +1,6 @@
 import asyncio
 import os
+from tkinter import N
 
 import aiohttp
 import structlog
@@ -8,6 +9,7 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import (
+    Application,
     ApplicationBuilder,
     CommandHandler,
     ContextTypes,
@@ -129,6 +131,11 @@ async def message_filter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             )
 
 
+async def messages_consume(application: Application) -> None:
+    while message := await settings.telegram_messages.get():
+        asyncio.create_task(application.bot.send_message(**message))
+
+
 async def petrol_fetch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info(update)
 
@@ -141,13 +148,6 @@ async def petrol_fetch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                     text=await meow_petrol(session),
                 )
             )
-
-
-async def queue_consume() -> None:
-    while update_dict := await settings.telegram_queue.get():
-        asyncio.create_task(
-            application.update_queue.put(Update.de_json(update_dict, application.bot))
-        )
 
 
 async def run(exit_event: asyncio.Event | settings.Event) -> None:
@@ -171,8 +171,6 @@ async def run(exit_event: asyncio.Event | settings.Event) -> None:
         )
     )
 
-    asyncio.create_task(queue_consume())
-
     async with application:
         logger.info("TELEGRAM: Starting")
         await application.start()
@@ -189,6 +187,9 @@ async def run(exit_event: asyncio.Event | settings.Event) -> None:
                     text=meow_say("Bot is up"),
                 )
             )
+
+        asyncio.create_task(updates_consume())
+        asyncio.create_task(messages_consume(application))
 
         await exit_event.wait()
 
@@ -243,4 +244,11 @@ async def think_create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                     is_cowthink=True,
                 ),
             )
+        )
+
+
+async def updates_consume() -> None:
+    while update_dict := await settings.telegram_updates.get():
+        asyncio.create_task(
+            application.update_queue.put(Update.de_json(update_dict, application.bot))
         )

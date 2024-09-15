@@ -44,6 +44,14 @@ async def run(exit_event: asyncio.Event | settings.Event) -> None:
     await client.close()
 
 
+async def messages_consume() -> None:
+    global client
+
+    while message := await settings.discord_messages.get():
+        if channel := await client.fetch_channel(message["channel"]):
+            asyncio.create_task(channel.send(message["content"]))  # type: ignore
+
+
 @client.event
 async def on_message(message) -> None:
     if message.author == client.user:
@@ -124,3 +132,5 @@ async def on_ready() -> None:
             asyncio.create_task(
                 user.send(f"Bot {client.user.mention} is up\n{meow_say('Hello~')}")
             )
+
+    asyncio.create_task(messages_consume())

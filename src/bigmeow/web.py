@@ -5,8 +5,10 @@ import secrets
 import structlog
 from aiohttp import BasicAuth, ClientSession, web
 from dotenv import load_dotenv
+from telegram.constants import ParseMode
 
 import bigmeow.settings as settings
+from bigmeow.meow import meow_say
 
 load_dotenv()
 
@@ -100,6 +102,45 @@ async def telegram_post(request: web.Request) -> web.Response:
     assert settings.SECRET_TOKEN == request.headers["X-Telegram-Bot-Api-Secret-Token"]
 
     logger.info("WEBHOOK: Webhook receives a telegram request")
-    asyncio.create_task(settings.telegram_queue.put(await request.json()))
+    asyncio.create_task(settings.telegram_updates.put(await request.json()))
+
+    return web.Response()
+
+
+@routes.post("/chat")
+async def chat_post(request: web.Request) -> web.Response:
+    text = await request.text()
+
+    logger.info(
+        "Sending chat message",
+        channel=request.headers["X-Channel"],
+        destination=request.headers["X-Destination"],
+        text=text,
+    )
+    match request.headers["X-Channel"]:
+        case "telegram":
+            asyncio.create_task(
+                settings.telegram_messages.put(
+                    {
+                        "text": meow_say(text),
+                        "chat_id": request.headers["X-Destination"],
+                        "parse_mode": ParseMode.MARKDOWN,
+                    }
+                )
+            )
+            pass
+
+        case "discord":
+            asyncio.create_task(
+                settings.discord_messages.put(
+                    {
+                        "content": meow_say(text),
+                        "channel": int(request.headers["X-Destination"]),
+                    }
+                )
+            )
+
+        case _:
+            raise Exception("Invalid channel")
 
     return web.Response()
