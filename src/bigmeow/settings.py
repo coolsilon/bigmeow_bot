@@ -145,6 +145,7 @@ class MeowCommand(Enum):
     FACT = "meowfact"
     ISBLOCKED = "meowisblocked"
     THINK = "meowthink"
+    PROMPT = "meowprompt"
 
     def telegram(self) -> str:
         COMMAND_PREFIX = "/"

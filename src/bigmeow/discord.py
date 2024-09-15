@@ -12,6 +12,7 @@ from bigmeow.meow import (
     meow_fact,
     meow_fetch_photo,
     meow_petrol,
+    meow_prompt,
     meow_say,
 )
 from bigmeow.settings import MeowCommand
@@ -59,6 +60,14 @@ async def on_message(message) -> None:
                 message.channel.send(
                     meow_say(message.content.replace(str(MeowCommand.SAY), "").strip())
                 )
+            )
+
+        elif message.content.startswith(str(MeowCommand.PROMPT)):
+            await meow_prompt(
+                session,
+                message.content.replace(str(MeowCommand.PROMPT), "").strip(),
+                channel="discord",
+                destination=str(message.channel.id),
             )
 
         elif message.content.startswith(str(MeowCommand.THINK)):

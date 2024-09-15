@@ -1,6 +1,7 @@
 import asyncio
 import os
 
+import aiohttp
 import structlog
 from aiohttp import ClientSession
 from dotenv import load_dotenv
@@ -20,6 +21,7 @@ from bigmeow.meow import (
     meow_fact,
     meow_fetch_photo,
     meow_petrol,
+    meow_prompt,
     meow_say,
 )
 from bigmeow.settings import MeowCommand
@@ -68,13 +70,14 @@ async def fact_fetch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def message_filter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.info(update)
+
     async with ClientSession() as session:
         if (
             update.message
             and update.effective_chat
             and str(MeowCommand.SAY) in (update.message.text or "")
         ):
-            logger.info(update)
             asyncio.create_task(say_create(update, context))
 
         elif (
@@ -82,15 +85,20 @@ async def message_filter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             and update.effective_chat
             and str(MeowCommand.THINK) in (update.message.text or "")
         ):
-            logger.info(update)
             asyncio.create_task(think_create(update, context))
+
+        elif (
+            update.message
+            and update.effective_chat
+            and str(MeowCommand.PROMPT) in (update.message.text or "")
+        ):
+            asyncio.create_task(prompt_create(update, context))
 
         elif (
             update.message
             and update.effective_chat
             and str(MeowCommand.PETROL) in (update.message.text or "")
         ):
-            logger.info(update)
             asyncio.create_task(petrol_fetch(update, context))
 
         elif (
@@ -98,7 +106,6 @@ async def message_filter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             and update.effective_chat
             and str(MeowCommand.FACT) in (update.message.text or "")
         ):
-            logger.info(update)
             asyncio.create_task(fact_fetch(update, context))
 
         elif (
@@ -106,7 +113,6 @@ async def message_filter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             and update.effective_chat
             and str(MeowCommand.ISBLOCKED) in (update.message.text or "")
         ):
-            logger.info(update)
             asyncio.create_task(blockedornot_fetch(update, context))
 
         elif (
@@ -149,7 +155,8 @@ async def run(exit_event: asyncio.Event | settings.Event) -> None:
 
     application.add_handler(CommandHandler(MeowCommand.PETROL.value, petrol_fetch))
     application.add_handler(CommandHandler(MeowCommand.SAY.value, say_create))
-    application.add_handler(CommandHandler(MeowCommand.THINK.value, say_create))
+    application.add_handler(CommandHandler(MeowCommand.THINK.value, think_create))
+    application.add_handler(CommandHandler(MeowCommand.PROMPT.value, prompt_create))
     application.add_handler(CommandHandler(MeowCommand.FACT.value, fact_fetch))
     application.add_handler(
         CommandHandler(MeowCommand.ISBLOCKED.value, blockedornot_fetch)
@@ -189,6 +196,21 @@ async def run(exit_event: asyncio.Event | settings.Event) -> None:
         await application.stop()
 
 
+async def prompt_create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.info(update)
+
+    if update.message and update.message.text and update.effective_chat:
+        async with aiohttp.ClientSession() as session:
+            await meow_prompt(
+                session,
+                update.message.text.replace(MeowCommand.PROMPT.telegram(), "")
+                .replace(str(MeowCommand.PROMPT), "")
+                .strip(),
+                channel="telegram",
+                destination=str(update.effective_chat.id),
+            )
+
+
 async def say_create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info(update)
 
@@ -215,8 +237,8 @@ async def think_create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 chat_id=update.effective_chat.id,
                 parse_mode=ParseMode.MARKDOWN,
                 text=meow_say(
-                    update.message.text.replace(MeowCommand.SAY.telegram(), "")
-                    .replace(str(MeowCommand.SAY), "")
+                    update.message.text.replace(MeowCommand.THINK.telegram(), "")
+                    .replace(str(MeowCommand.THINK), "")
                     .strip(),
                     is_cowthink=True,
                 ),
