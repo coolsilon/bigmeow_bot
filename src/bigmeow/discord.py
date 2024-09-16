@@ -5,11 +5,10 @@ from io import StringIO
 
 import discord
 import structlog
-from aiohttp import ClientSession
 from dotenv import load_dotenv
 
 import bigmeow.settings as settings
-from bigmeow.common import message_contains
+from bigmeow.common import check_is_debug, message_contains
 from bigmeow.meow import (
     meow_blockedornot,
     meow_fact,
@@ -39,12 +38,13 @@ async def run(exit_event: asyncio.Event | settings.Event) -> None:
     global client
 
     logger.info("DISCORD: Starting")
-    asyncio.create_task(client.start(os.environ["DISCORD_TOKEN"]))
+    async with client:
+        asyncio.create_task(client.start(os.environ["DISCORD_TOKEN"]))
 
-    await exit_event.wait()
+        await exit_event.wait()
 
-    logger.info("DISCORD: Stopping")
-    await client.close()
+        logger.info("DISCORD: Stopping")
+        await client.close()
 
 
 async def messages_consume() -> None:
@@ -76,66 +76,61 @@ async def on_message(message: discord.Message) -> None:
 
     logger.info("DISCORD: Received a message", message=message)
 
-    async with ClientSession() as session:
-        if message_contains(message.content, str(MeowCommand.PETROL)):
-            asyncio.create_task(
-                text_send(await meow_petrol(session), reference=message)
-            )
+    if message_contains(message.content, str(MeowCommand.PETROL)):
+        asyncio.create_task(text_send(await meow_petrol(), reference=message))
 
-        elif message_contains(message.content, str(MeowCommand.SAY)):
-            asyncio.create_task(
-                text_send(
-                    meow_say(message.content.replace(str(MeowCommand.SAY), "").strip()),
-                    reference=message,
-                )
+    elif message_contains(message.content, str(MeowCommand.SAY)):
+        asyncio.create_task(
+            text_send(
+                meow_say(message.content.replace(str(MeowCommand.SAY), "").strip()),
+                reference=message,
             )
+        )
 
-        elif message_contains(message.content, str(MeowCommand.PROMPT)):
-            await meow_prompt(
-                session,
-                message.content.replace(str(MeowCommand.PROMPT), "").strip(),
-                channel="discord",
-                destination=json.dumps((message.channel.id, message.id)),
+    elif message_contains(message.content, str(MeowCommand.PROMPT)):
+        await meow_prompt(
+            message.content.replace(str(MeowCommand.PROMPT), "").strip(),
+            channel="discord",
+            destination=json.dumps((message.channel.id, message.id)),
+        )
+
+    elif message_contains(message.content, str(MeowCommand.THINK)):
+        asyncio.create_task(
+            text_send(
+                meow_say(
+                    message.content.replace(str(MeowCommand.THINK), "").strip(),
+                    is_cowthink=True,
+                ),
+                reference=message,
             )
+        )
 
-        elif message_contains(message.content, str(MeowCommand.THINK)):
-            asyncio.create_task(
-                text_send(
-                    meow_say(
-                        message.content.replace(str(MeowCommand.THINK), "").strip(),
-                        is_cowthink=True,
-                    ),
-                    reference=message,
-                )
+    elif message_contains(message.content, str(MeowCommand.FACT)):
+        asyncio.create_task(text_send(await meow_fact(), reference=message))
+
+    elif message_contains(message.content, str(MeowCommand.ISBLOCKED)):
+        asyncio.create_task(
+            text_send(
+                await meow_blockedornot(
+                    message.content.replace(str(MeowCommand.ISBLOCKED), "").strip(),
+                ),
+                reference=message,
             )
+        )
 
-        elif message_contains(message.content, str(MeowCommand.FACT)):
-            asyncio.create_task(text_send(await meow_fact(session), reference=message))
-
-        elif message_contains(message.content, str(MeowCommand.ISBLOCKED)):
-            asyncio.create_task(
-                text_send(
-                    await meow_blockedornot(
-                        session,
-                        message.content.replace(str(MeowCommand.ISBLOCKED), "").strip(),
-                    ),
-                    reference=message,
-                )
+    elif message_contains(message.content, "meow", is_command=False):
+        logger.info("DISCORD: Sending a cat photo", message=message)
+        asyncio.create_task(
+            message.channel.send(
+                "photo from https://cataas.com/",
+                file=discord.File(
+                    await meow_fetch_photo(),
+                    description="photo from https://cataas.com/",
+                    filename="meow.png",
+                ),
+                reference=message,
             )
-
-        elif message_contains(message.content, "meow", is_command=False):
-            logger.info("DISCORD: Sending a cat photo", message=message)
-            asyncio.create_task(
-                message.channel.send(
-                    "photo from https://cataas.com/",
-                    file=discord.File(
-                        await meow_fetch_photo(session),
-                        description="photo from https://cataas.com/",
-                        filename="meow.png",
-                    ),
-                    reference=message,
-                )
-            )
+        )
 
 
 @client.event
@@ -144,7 +139,7 @@ async def on_ready() -> None:
 
     logger.info("DISCORD: Ready for requests")
 
-    if not os.environ.get("DEBUG", "False").upper() == "TRUE":
+    if not check_is_debug():
         user = await client.fetch_user(int(os.environ["DISCORD_USER"]))
 
         logger.info(
@@ -163,7 +158,12 @@ async def text_send(content: str, reference: discord.Message) -> None:
         reference.channel.send(
             reference=reference,
             **(
-                {"file": discord.File(StringIO(content), filename="message.txt")}  # type: ignore
+                {
+                    "file": discord.File(
+                        StringIO(content.strip("`")),  # type: ignore
+                        filename="message.txt",
+                    )
+                }
                 if len(content) > 2000
                 else {"content": content}
             ),  # type: ignore

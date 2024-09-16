@@ -2,24 +2,32 @@ import asyncio
 import json
 import os
 import secrets
+from contextlib import asynccontextmanager
+from typing import Annotated
 
+import aiohttp
 import structlog
-from aiohttp import BasicAuth, ClientSession, web
+import uvicorn
 from dotenv import load_dotenv
+from fastapi import FastAPI, Header, Request
+from fastapi.responses import PlainTextResponse
 from telegram.constants import ParseMode
 
 import bigmeow.settings as settings
+from bigmeow.common import check_is_debug
 from bigmeow.meow import meow_say
 
 load_dotenv()
 
 logger = structlog.get_logger()
 
+
+app = FastAPI()
+
 SECRET_PING = secrets.token_hex(128)
 SECRET_PING_USER = "BigMeow"
 
 secret_ping_password = None
-routes = web.RouteTableDef()
 
 
 def check_login_is_valid(authorization: str | None) -> bool:
@@ -28,7 +36,7 @@ def check_login_is_valid(authorization: str | None) -> bool:
     result = False
 
     if authorization:
-        auth = BasicAuth.decode(authorization)
+        auth = aiohttp.BasicAuth.decode(authorization)
         result = auth.login == SECRET_PING_USER and (
             auth.password == secret_ping_password
         )
@@ -36,49 +44,35 @@ def check_login_is_valid(authorization: str | None) -> bool:
     return result
 
 
-async def run(exit_event: asyncio.Event | settings.Event) -> None:
-    global routes
+def run() -> None:
+    is_debug = check_is_debug()
 
-    application = web.Application()
-    application.add_routes(routes)
-
-    logger.info("WEBHOOK: Starting", url=os.environ["WEBHOOK_URL"])
-    web_runner = web.AppRunner(application)
-    await web_runner.setup()
-
-    web_site = web.TCPSite(web_runner, port=int(os.environ.get("WEBHOOK_PORT", "8080")))
-    await web_site.start()
-
-    async with ClientSession() as session:
-        if not await web_check(session):
-            logger.error("WEBHOOK: Webhook is unreachable, stopping")
-
-            await web_site.stop()
-            await web_runner.cleanup()
-            raise Exception("Webhook is unreachable")
-
-        else:
-            await exit_event.wait()
-
-            logger.info("WEBHOOK: Stopping")
-            await web_site.stop()
-            await web_runner.cleanup()
+    logger.info("WEB: Web server is starting")
+    uvicorn.run(
+        "bigmeow.web:app",
+        host="0.0.0.0",
+        port=int(os.environ.get("WEBHOOK_PORT", "8080")),
+        log_level="info",
+        workers=None if is_debug else 4,
+    )
 
 
-async def web_check(session: ClientSession) -> bool:
+async def check_is_reachable() -> None:
     global SECRET_PING_USER, secret_ping_password
 
-    result, ping_url = False, f'{os.environ["WEBHOOK_URL"]}/{SECRET_PING}'
+    ping_url = f'{os.environ["WEBHOOK_URL"]}/{SECRET_PING}'
     secret_ping_password = secrets.token_hex(128)
 
-    async with session.get(
-        ping_url, auth=BasicAuth(SECRET_PING_USER, secret_ping_password)
+    async with aiohttp.request(
+        "GET",
+        ping_url,
+        auth=aiohttp.BasicAuth(SECRET_PING_USER, secret_ping_password),
     ) as response:
         if response.status == 200 and (await response.text()).strip() == "pong":
-            logger.info("WEBHOOK: Website is up", ping_url=ping_url)
-            result = True
+            logger.info("WEB: Website is up", ping_url=ping_url)
 
-    return result
+        else:
+            raise Exception("Site is unreachable")
 
 
 #
@@ -86,41 +80,45 @@ async def web_check(session: ClientSession) -> bool:
 #
 
 
-@routes.get("/")
-async def index_get(request: web.Request) -> web.Response:
-    return web.Response(text="Hello, world")
+@app.get("/", response_class=PlainTextResponse)
+async def index_get() -> str:
+    return "Hello world"
 
 
-@routes.get(f"/{SECRET_PING}")
-async def pong_get(request: web.Request) -> web.Response:
-    assert check_login_is_valid(request.headers.get("Authorization"))  # auth check
+@app.get(f"/{SECRET_PING}", response_class=PlainTextResponse)
+async def pong_get(authorization: Annotated[str, Header()]) -> str:
+    assert check_login_is_valid(authorization)  # auth check
 
-    return web.Response(text="pong")
+    return "pong"
 
 
-@routes.post("/telegram")
-async def telegram_post(request: web.Request) -> web.Response:
-    assert settings.SECRET_TOKEN == request.headers["X-Telegram-Bot-Api-Secret-Token"]
+@app.post("/telegram")
+async def telegram_post(
+    request: Request, x_telegram_bot_api_secret_token: Annotated[str, Header()]
+) -> None:
+    assert settings.SECRET_TOKEN == x_telegram_bot_api_secret_token
 
     logger.info("WEBHOOK: Webhook receives a telegram request")
     asyncio.create_task(settings.telegram_updates.put(await request.json()))
 
-    return web.Response()
 
-
-@routes.post("/chat")
-async def chat_post(request: web.Request) -> web.Response:
-    text = await request.text()
+@app.post("/chat")
+async def chat_post(
+    request: Request,
+    x_channel: Annotated[str, Header()],
+    x_destination: Annotated[str, Header()],
+) -> None:
+    text = (await request.body()).decode()
 
     logger.info(
         "Sending chat message",
-        channel=request.headers["X-Channel"],
-        destination=request.headers["X-Destination"],
+        channel=x_channel,
+        destination=x_destination,
         text=text,
     )
-    match request.headers["X-Channel"]:
+    match x_channel:
         case "telegram":
-            chat_id, message_id = json.loads(request.headers["X-Destination"])
+            chat_id, message_id = json.loads(x_destination)
 
             asyncio.create_task(
                 settings.telegram_messages.put(
@@ -135,7 +133,7 @@ async def chat_post(request: web.Request) -> web.Response:
             )
 
         case "discord":
-            channel_id, message_id = json.loads(request.headers["X-Destination"])
+            channel_id, message_id = json.loads(x_destination)
             asyncio.create_task(
                 settings.discord_messages.put(
                     {
@@ -148,5 +146,3 @@ async def chat_post(request: web.Request) -> web.Response:
 
         case _:
             raise Exception("Invalid channel")
-
-    return web.Response()
