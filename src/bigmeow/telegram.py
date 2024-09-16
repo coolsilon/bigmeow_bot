@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 
 import aiohttp
@@ -52,6 +53,8 @@ async def blockedornot_fetch(
                         .replace(str(MeowCommand.ISBLOCKED), "")
                         .strip(),
                     ),
+                    reply_to_message_id=update.message.id,
+                    allow_sending_without_reply=True,
                 )
             )
 
@@ -59,13 +62,15 @@ async def blockedornot_fetch(
 async def fact_fetch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info("TELEGRAM: Processing fact request", update=update)
 
-    if update.effective_chat:
+    if update.message and update.message.text and update.effective_chat:
         async with ClientSession() as session:
             asyncio.create_task(
                 context.bot.send_message(
                     chat_id=update.effective_chat.id,
                     parse_mode=ParseMode.MARKDOWN,
                     text=await meow_fact(session),
+                    reply_to_message_id=update.message.id,
+                    allow_sending_without_reply=True,
                 )
             )
 
@@ -102,6 +107,8 @@ async def message_filter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     chat_id=update.effective_chat.id,
                     photo=await meow_fetch_photo(session),
                     caption="photo from https://cataas.com/",
+                    reply_to_message_id=update.message.id,
+                    allow_sending_without_reply=True,
                 )
             )
 
@@ -116,13 +123,15 @@ async def messages_consume() -> None:
 async def petrol_fetch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info("TELEGRAM: Processing petrol request", update=update)
 
-    if update.effective_chat:
+    if update.message and update.message.text and update.effective_chat:
         async with ClientSession() as session:
             asyncio.create_task(
                 context.bot.send_message(
                     chat_id=update.effective_chat.id,
                     parse_mode=ParseMode.MARKDOWN,
                     text=await meow_petrol(session),
+                    reply_to_message_id=update.message.id,
+                    allow_sending_without_reply=True,
                 )
             )
 
@@ -197,7 +206,7 @@ async def prompt_create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 .replace(str(MeowCommand.PROMPT), "")
                 .strip(),
                 channel="telegram",
-                destination=str(update.effective_chat.id),
+                destination=json.dumps((update.effective_chat.id, update.message.id)),
             )
 
 
@@ -214,6 +223,8 @@ async def say_create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     .replace(str(MeowCommand.SAY), "")
                     .strip()
                 ),
+                reply_to_message_id=update.message.id,
+                allow_sending_without_reply=True,
             )
         )
 
@@ -232,6 +243,8 @@ async def think_create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                     .strip(),
                     is_cowthink=True,
                 ),
+                reply_to_message_id=update.message.id,
+                allow_sending_without_reply=True,
             )
         )
 

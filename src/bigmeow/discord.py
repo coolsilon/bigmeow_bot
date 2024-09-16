@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 
 import discord
@@ -48,9 +49,23 @@ async def run(exit_event: asyncio.Event | settings.Event) -> None:
 async def messages_consume() -> None:
     global client
 
-    while message := await settings.discord_messages.get():
-        if channel := await client.fetch_channel(message["channel"]):
-            asyncio.create_task(channel.send(message["content"]))  # type: ignore
+    while data := await settings.discord_messages.get():
+        logger.info("DISCORD: Processing messages from queue", data=data)
+
+        try:
+            channel = await client.fetch_channel(data["channel_id"])
+        except Exception as e:
+            logger.error("DISCORD: Invalid channel", data=data)
+            logger.exception(e)
+            continue
+
+        try:
+            message = await channel.fetch_message(data["message_id"])  # type: ignore
+        except Exception:
+            logger.info("DISCORD: Unable to find message to reply to", data=data)
+            message = None
+
+        asyncio.create_task(channel.send(data["content"], reference=message))  # type: ignore
 
 
 @client.event
@@ -62,12 +77,15 @@ async def on_message(message) -> None:
 
     async with ClientSession() as session:
         if message_contains(message.content, str(MeowCommand.PETROL)):
-            asyncio.create_task(message.channel.send(await meow_petrol(session)))
+            asyncio.create_task(
+                message.channel.send(await meow_petrol(session), reference=message)
+            )
 
         elif message_contains(message.content, str(MeowCommand.SAY)):
             asyncio.create_task(
                 message.channel.send(
-                    meow_say(message.content.replace(str(MeowCommand.SAY), "").strip())
+                    meow_say(message.content.replace(str(MeowCommand.SAY), "").strip()),
+                    reference=message,
                 )
             )
 
@@ -76,7 +94,7 @@ async def on_message(message) -> None:
                 session,
                 message.content.replace(str(MeowCommand.PROMPT), "").strip(),
                 channel="discord",
-                destination=str(message.channel.id),
+                destination=json.dumps((message.channel.id, message.id)),
             )
 
         elif message_contains(message.content, str(MeowCommand.THINK)):
@@ -85,12 +103,15 @@ async def on_message(message) -> None:
                     meow_say(
                         message.content.replace(str(MeowCommand.THINK), "").strip(),
                         is_cowthink=True,
-                    )
+                    ),
+                    reference=message,
                 )
             )
 
         elif message_contains(message.content, str(MeowCommand.FACT)):
-            asyncio.create_task(message.channel.send(await meow_fact(session)))
+            asyncio.create_task(
+                message.channel.send(await meow_fact(session), reference=message)
+            )
 
         elif message_contains(message.content, str(MeowCommand.ISBLOCKED)):
             asyncio.create_task(
@@ -98,7 +119,8 @@ async def on_message(message) -> None:
                     await meow_blockedornot(
                         session,
                         message.content.replace(str(MeowCommand.ISBLOCKED), "").strip(),
-                    )
+                    ),
+                    reference=message,
                 )
             )
 
@@ -112,6 +134,7 @@ async def on_message(message) -> None:
                         description="photo from https://cataas.com/",
                         filename="meow.png",
                     ),
+                    reference=message,
                 )
             )
 

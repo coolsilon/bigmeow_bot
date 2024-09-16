@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import secrets
 
@@ -119,23 +120,28 @@ async def chat_post(request: web.Request) -> web.Response:
     )
     match request.headers["X-Channel"]:
         case "telegram":
+            chat_id, message_id = json.loads(request.headers["X-Destination"])
+
             asyncio.create_task(
                 settings.telegram_messages.put(
                     {
                         "text": meow_say(text),
-                        "chat_id": request.headers["X-Destination"],
+                        "chat_id": chat_id,
                         "parse_mode": ParseMode.MARKDOWN,
+                        "reply_to_message_id": message_id,
+                        "allow_sending_without_reply": True,
                     }
                 )
             )
-            pass
 
         case "discord":
+            channel_id, message_id = json.loads(request.headers["X-Destination"])
             asyncio.create_task(
                 settings.discord_messages.put(
                     {
                         "content": meow_say(text),
-                        "channel": int(request.headers["X-Destination"]),
+                        "channel_id": channel_id,
+                        "message_id": message_id,
                     }
                 )
             )
