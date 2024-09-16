@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+from io import StringIO
 
 import discord
 import structlog
@@ -65,11 +66,11 @@ async def messages_consume() -> None:
             logger.info("DISCORD: Unable to find message to reply to", data=data)
             message = None
 
-        asyncio.create_task(channel.send(data["content"], reference=message))  # type: ignore
+        asyncio.create_task(text_send(data["content"], reference=message))  # type: ignore
 
 
 @client.event
-async def on_message(message) -> None:
+async def on_message(message: discord.Message) -> None:
     if message.author == client.user:
         return
 
@@ -78,12 +79,12 @@ async def on_message(message) -> None:
     async with ClientSession() as session:
         if message_contains(message.content, str(MeowCommand.PETROL)):
             asyncio.create_task(
-                message.channel.send(await meow_petrol(session), reference=message)
+                text_send(await meow_petrol(session), reference=message)
             )
 
         elif message_contains(message.content, str(MeowCommand.SAY)):
             asyncio.create_task(
-                message.channel.send(
+                text_send(
                     meow_say(message.content.replace(str(MeowCommand.SAY), "").strip()),
                     reference=message,
                 )
@@ -99,7 +100,7 @@ async def on_message(message) -> None:
 
         elif message_contains(message.content, str(MeowCommand.THINK)):
             asyncio.create_task(
-                message.channel.send(
+                text_send(
                     meow_say(
                         message.content.replace(str(MeowCommand.THINK), "").strip(),
                         is_cowthink=True,
@@ -109,13 +110,11 @@ async def on_message(message) -> None:
             )
 
         elif message_contains(message.content, str(MeowCommand.FACT)):
-            asyncio.create_task(
-                message.channel.send(await meow_fact(session), reference=message)
-            )
+            asyncio.create_task(text_send(await meow_fact(session), reference=message))
 
         elif message_contains(message.content, str(MeowCommand.ISBLOCKED)):
             asyncio.create_task(
-                message.channel.send(
+                text_send(
                     await meow_blockedornot(
                         session,
                         message.content.replace(str(MeowCommand.ISBLOCKED), "").strip(),
@@ -157,3 +156,16 @@ async def on_ready() -> None:
             )
 
     asyncio.create_task(messages_consume())
+
+
+async def text_send(content: str, reference: discord.Message) -> None:
+    asyncio.create_task(
+        reference.channel.send(
+            reference=reference,
+            **(
+                {"file": discord.File(StringIO(content), filename="message.txt")}  # type: ignore
+                if len(content) > 2000
+                else {"content": content}
+            ),  # type: ignore
+        )
+    )
