@@ -14,6 +14,7 @@ A dumb experimental bot done for no good reason
 * `!meowpetrol`: BigMeow will attempt to report the current petrol price in Malaysia, data from https://data.gov.my/data-catalogue/fuelprice
 * `!meowfact`: Return a meow fact from https://github.com/wh-iterabb-it/meowfacts
 * `!meowisblocked domain.tld`: Perform a query to https://blockedornot.sinarproject.org/ to check if a domain is blocked in Malaysia
+* `!meowprompt prompt`: a reply to the supplied prompt, powered by https://ifttt.com/
 * If your message has a `meow` in it, a cat photo is fetched from https://cataas.com/
 
 NOTE: all `!` commands can be replaced by `/` in telegram, e.g. `/meowsay hello world`.
@@ -33,6 +34,8 @@ TELEGRAM_TOKEN=<TELEGRAM TOKEN>
 TELEGRAM_USER=<OWNER TELEGRAM CHAT ID>
 WEBHOOK_URL=<URL TO WEBHOOK>
 DEBUG=<True IF RUNNING LOCALLY OTHERWISE False>
+IFTTT_KEY=<IFTTT_TOKEN>
+MEOW_THREADS=<True IF MULTITHREADING IS DESIRED OTHERWISE FALSE>
 ```
 
 ### Python
