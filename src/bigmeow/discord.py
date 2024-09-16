@@ -7,6 +7,7 @@ from aiohttp import ClientSession
 from dotenv import load_dotenv
 
 import bigmeow.settings as settings
+from bigmeow.common import message_contains
 from bigmeow.meow import (
     meow_blockedornot,
     meow_fact,
@@ -57,20 +58,20 @@ async def on_message(message) -> None:
     if message.author == client.user:
         return
 
+    logger.info("DISCORD: Received a message", message=message)
+
     async with ClientSession() as session:
-        if message.content.startswith(str(MeowCommand.PETROL)):
-            logger.info(message)
+        if message_contains(message.content, str(MeowCommand.PETROL)):
             asyncio.create_task(message.channel.send(await meow_petrol(session)))
 
-        elif message.content.startswith(str(MeowCommand.SAY)):
-            logger.info(message)
+        elif message_contains(message.content, str(MeowCommand.SAY)):
             asyncio.create_task(
                 message.channel.send(
                     meow_say(message.content.replace(str(MeowCommand.SAY), "").strip())
                 )
             )
 
-        elif message.content.startswith(str(MeowCommand.PROMPT)):
+        elif message_contains(message.content, str(MeowCommand.PROMPT)):
             await meow_prompt(
                 session,
                 message.content.replace(str(MeowCommand.PROMPT), "").strip(),
@@ -78,8 +79,7 @@ async def on_message(message) -> None:
                 destination=str(message.channel.id),
             )
 
-        elif message.content.startswith(str(MeowCommand.THINK)):
-            logger.info(message)
+        elif message_contains(message.content, str(MeowCommand.THINK)):
             asyncio.create_task(
                 message.channel.send(
                     meow_say(
@@ -89,12 +89,10 @@ async def on_message(message) -> None:
                 )
             )
 
-        elif message.content.startswith(str(MeowCommand.FACT)):
-            logger.info(message)
+        elif message_contains(message.content, str(MeowCommand.FACT)):
             asyncio.create_task(message.channel.send(await meow_fact(session)))
 
-        elif message.content.startswith(str(MeowCommand.ISBLOCKED)):
-            logger.info(message)
+        elif message_contains(message.content, str(MeowCommand.ISBLOCKED)):
             asyncio.create_task(
                 message.channel.send(
                     await meow_blockedornot(
@@ -104,8 +102,8 @@ async def on_message(message) -> None:
                 )
             )
 
-        elif "meow" in message.content.lower():
-            logger.info(message)
+        elif message_contains(message.content, "meow", is_command=False):
+            logger.info("DISCORD: Sending a cat photo", message=message)
             asyncio.create_task(
                 message.channel.send(
                     "photo from https://cataas.com/",
@@ -121,6 +119,8 @@ async def on_message(message) -> None:
 @client.event
 async def on_ready() -> None:
     global client
+
+    logger.info("DISCORD: Ready for requests")
 
     if not os.environ.get("DEBUG", "False").upper() == "TRUE":
         user = await client.fetch_user(int(os.environ["DISCORD_USER"]))
