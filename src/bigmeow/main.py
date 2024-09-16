@@ -29,8 +29,10 @@ def done_handler(task: Future, exit_event: settings.Event) -> None:
 def exception_handler(
     loop: asyncio.AbstractEventLoop, context: dict[str, Any], exit_event: asyncio.Event
 ) -> None:
-    message = context.get("exception", context["message"])
-    logger.error("Caught exception", message=message)
+    try:
+        logger.exception(context["exception"])
+    except KeyError:
+        logger.error(context["message"])
 
     logger.error("MAIN: Shutting down")
     asyncio.create_task(shutdown_handler(loop, exit_event))
@@ -62,7 +64,10 @@ def threading_setup():
     settings.cat_lock = settings.Lock(threading.Lock())
     settings.fact_lock = settings.Lock(threading.Lock())
     settings.latest_lock = settings.Lock(threading.Lock())
-    settings.telegram_queue = settings.Queue()
+    settings.telegram_updates = settings.Queue()
+
+    settings.discord_messages = settings.Queue()
+    settings.telegram_messages = settings.Queue()
 
 
 def main() -> None:

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 
 import discord
@@ -7,11 +8,13 @@ from aiohttp import ClientSession
 from dotenv import load_dotenv
 
 import bigmeow.settings as settings
+from bigmeow.common import message_contains
 from bigmeow.meow import (
     meow_blockedornot,
     meow_fact,
     meow_fetch_photo,
     meow_petrol,
+    meow_prompt,
     meow_say,
 )
 from bigmeow.settings import MeowCommand
@@ -43,52 +46,86 @@ async def run(exit_event: asyncio.Event | settings.Event) -> None:
     await client.close()
 
 
+async def messages_consume() -> None:
+    global client
+
+    while data := await settings.discord_messages.get():
+        logger.info("DISCORD: Processing messages from queue", data=data)
+
+        try:
+            channel = await client.fetch_channel(data["channel_id"])
+        except Exception as e:
+            logger.error("DISCORD: Invalid channel", data=data)
+            logger.exception(e)
+            continue
+
+        try:
+            message = await channel.fetch_message(data["message_id"])  # type: ignore
+        except Exception:
+            logger.info("DISCORD: Unable to find message to reply to", data=data)
+            message = None
+
+        asyncio.create_task(channel.send(data["content"], reference=message))  # type: ignore
+
+
 @client.event
 async def on_message(message) -> None:
     if message.author == client.user:
         return
 
-    async with ClientSession() as session:
-        if message.content.startswith(str(MeowCommand.PETROL)):
-            logger.info(message)
-            asyncio.create_task(message.channel.send(await meow_petrol(session)))
+    logger.info("DISCORD: Received a message", message=message)
 
-        elif message.content.startswith(str(MeowCommand.SAY)):
-            logger.info(message)
+    async with ClientSession() as session:
+        if message_contains(message.content, str(MeowCommand.PETROL)):
+            asyncio.create_task(
+                message.channel.send(await meow_petrol(session), reference=message)
+            )
+
+        elif message_contains(message.content, str(MeowCommand.SAY)):
             asyncio.create_task(
                 message.channel.send(
-                    meow_say(message.content.replace(str(MeowCommand.SAY), "").strip())
+                    meow_say(message.content.replace(str(MeowCommand.SAY), "").strip()),
+                    reference=message,
                 )
             )
 
-        elif message.content.startswith(str(MeowCommand.THINK)):
-            logger.info(message)
+        elif message_contains(message.content, str(MeowCommand.PROMPT)):
+            await meow_prompt(
+                session,
+                message.content.replace(str(MeowCommand.PROMPT), "").strip(),
+                channel="discord",
+                destination=json.dumps((message.channel.id, message.id)),
+            )
+
+        elif message_contains(message.content, str(MeowCommand.THINK)):
             asyncio.create_task(
                 message.channel.send(
                     meow_say(
                         message.content.replace(str(MeowCommand.THINK), "").strip(),
                         is_cowthink=True,
-                    )
+                    ),
+                    reference=message,
                 )
             )
 
-        elif message.content.startswith(str(MeowCommand.FACT)):
-            logger.info(message)
-            asyncio.create_task(message.channel.send(await meow_fact(session)))
+        elif message_contains(message.content, str(MeowCommand.FACT)):
+            asyncio.create_task(
+                message.channel.send(await meow_fact(session), reference=message)
+            )
 
-        elif message.content.startswith(str(MeowCommand.ISBLOCKED)):
-            logger.info(message)
+        elif message_contains(message.content, str(MeowCommand.ISBLOCKED)):
             asyncio.create_task(
                 message.channel.send(
                     await meow_blockedornot(
                         session,
                         message.content.replace(str(MeowCommand.ISBLOCKED), "").strip(),
-                    )
+                    ),
+                    reference=message,
                 )
             )
 
-        elif "meow" in message.content.lower():
-            logger.info(message)
+        elif message_contains(message.content, "meow", is_command=False):
+            logger.info("DISCORD: Sending a cat photo", message=message)
             asyncio.create_task(
                 message.channel.send(
                     "photo from https://cataas.com/",
@@ -97,6 +134,7 @@ async def on_message(message) -> None:
                         description="photo from https://cataas.com/",
                         filename="meow.png",
                     ),
+                    reference=message,
                 )
             )
 
@@ -104,6 +142,8 @@ async def on_message(message) -> None:
 @client.event
 async def on_ready() -> None:
     global client
+
+    logger.info("DISCORD: Ready for requests")
 
     if not os.environ.get("DEBUG", "False").upper() == "TRUE":
         user = await client.fetch_user(int(os.environ["DISCORD_USER"]))
@@ -115,3 +155,5 @@ async def on_ready() -> None:
             asyncio.create_task(
                 user.send(f"Bot {client.user.mention} is up\n{meow_say('Hello~')}")
             )
+
+    asyncio.create_task(messages_consume())

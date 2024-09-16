@@ -2,6 +2,7 @@ import csv
 from datetime import date, timedelta
 from functools import reduce
 from io import BytesIO, StringIO
+from os import environ
 from random import choice
 from typing import Callable
 
@@ -136,6 +137,17 @@ async def meow_fetch_photo(session: ClientSession) -> BytesIO:
                 if response.status == 200
                 else settings.cat_cache.get()
             )
+
+
+async def meow_prompt(
+    session: ClientSession, message: str, channel: str, destination: str
+) -> None:
+    url = f"https://maker.ifttt.com/trigger/prompt/with/key/{environ.get('IFTTT_KEY')}"
+    data = {"value1": message, "value2": channel, "value3": destination}
+
+    logger.info("MEOW: Sending IFTTT request", ifttt_event="prompt", data=data)
+    async with session.post(url, json=data) as response:
+        logger.info("MEOW: IFTTT response", response=await response.text())
 
 
 def meow_say(message: str, is_cowthink: bool = False, wrap_text: bool = True) -> str:
