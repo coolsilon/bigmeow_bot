@@ -2,9 +2,7 @@ import asyncio
 import json
 import os
 
-import aiohttp
 import structlog
-from aiohttp import ClientSession
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.constants import ParseMode
@@ -17,7 +15,7 @@ from telegram.ext import (
 )
 
 import bigmeow.settings as settings
-from bigmeow.common import message_contains
+from bigmeow.common import check_is_debug, message_contains
 from bigmeow.meow import (
     meow_blockedornot,
     meow_fact,
@@ -40,35 +38,30 @@ async def blockedornot_fetch(
     logger.info("TELEGRAM: Processing isblocked request", update=update)
 
     if update.message and update.message.text and update.effective_chat:
-        async with ClientSession() as session:
-            asyncio.create_task(
-                context.bot.send_message(
-                    chat_id=update.effective_chat.id,
-                    parse_mode=ParseMode.MARKDOWN,
-                    text=await meow_blockedornot(
-                        session,
-                        update.message.text.replace(
-                            MeowCommand.ISBLOCKED.telegram(), ""
-                        )
-                        .replace(str(MeowCommand.ISBLOCKED), "")
-                        .strip(),
-                    ),
-                    reply_to_message_id=update.message.id,
-                    allow_sending_without_reply=True,
-                )
+        asyncio.create_task(
+            context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                parse_mode=ParseMode.MARKDOWN,
+                text=await meow_blockedornot(
+                    update.message.text.replace(MeowCommand.ISBLOCKED.telegram(), "")
+                    .replace(str(MeowCommand.ISBLOCKED), "")
+                    .strip(),
+                ),
+                reply_to_message_id=update.message.id,
+                allow_sending_without_reply=True,
             )
+        )
 
 
 async def fact_fetch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info("TELEGRAM: Processing fact request", update=update)
 
     if update.message and update.message.text and update.effective_chat:
-        async with ClientSession() as session:
             asyncio.create_task(
                 context.bot.send_message(
                     chat_id=update.effective_chat.id,
                     parse_mode=ParseMode.MARKDOWN,
-                    text=await meow_fact(session),
+                    text=await meow_fact(),
                     reply_to_message_id=update.message.id,
                     allow_sending_without_reply=True,
                 )
@@ -101,16 +94,15 @@ async def message_filter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     elif message_contains(update.message.text, "meow", is_command=False):
         logger.info("TELEGRAM: Sending a cat photo", update=update)
-        async with ClientSession() as session:
-            asyncio.create_task(
-                context.bot.send_photo(
-                    chat_id=update.effective_chat.id,
-                    photo=await meow_fetch_photo(session),
-                    caption="photo from https://cataas.com/",
-                    reply_to_message_id=update.message.id,
-                    allow_sending_without_reply=True,
-                )
+        asyncio.create_task(
+            context.bot.send_photo(
+                chat_id=update.effective_chat.id,
+                photo=await meow_fetch_photo(),
+                caption="photo from https://cataas.com/",
+                reply_to_message_id=update.message.id,
+                allow_sending_without_reply=True,
             )
+        )
 
 
 async def messages_consume() -> None:
@@ -124,16 +116,15 @@ async def petrol_fetch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     logger.info("TELEGRAM: Processing petrol request", update=update)
 
     if update.message and update.message.text and update.effective_chat:
-        async with ClientSession() as session:
-            asyncio.create_task(
-                context.bot.send_message(
-                    chat_id=update.effective_chat.id,
-                    parse_mode=ParseMode.MARKDOWN,
-                    text=await meow_petrol(session),
-                    reply_to_message_id=update.message.id,
-                    allow_sending_without_reply=True,
-                )
+        asyncio.create_task(
+            context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                parse_mode=ParseMode.MARKDOWN,
+                text=await meow_petrol(),
+                reply_to_message_id=update.message.id,
+                allow_sending_without_reply=True,
             )
+        )
 
 
 async def run(exit_event: asyncio.Event | settings.Event) -> None:
@@ -147,7 +138,7 @@ async def run(exit_event: asyncio.Event | settings.Event) -> None:
 
         logger.info("TELEGRAM: Ready for requests")
 
-        if not os.environ.get("DEBUG", "False").upper() == "TRUE":
+        if not check_is_debug():
             logger.info(
                 "TELEGRAM: Sending up message to owner",
                 chat_id=os.environ["TELEGRAM_USER"],
@@ -190,7 +181,7 @@ async def setup() -> None:
         application.bot.set_webhook(
             f'{os.environ["WEBHOOK_URL"]}/telegram',
             allowed_updates=Update.ALL_TYPES,
-            secret_token=settings.SECRET_TOKEN,
+            secret_token=settings.WEB_TELEGRAM_TOKEN,
         )
     )
 
@@ -199,15 +190,13 @@ async def prompt_create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     logger.info("TELEGRAM: Dispatching prompt request", update=update)
 
     if update.message and update.message.text and update.effective_chat:
-        async with aiohttp.ClientSession() as session:
-            await meow_prompt(
-                session,
-                update.message.text.replace(MeowCommand.PROMPT.telegram(), "")
-                .replace(str(MeowCommand.PROMPT), "")
-                .strip(),
-                channel="telegram",
-                destination=json.dumps((update.effective_chat.id, update.message.id)),
-            )
+        await meow_prompt(
+            update.message.text.replace(MeowCommand.PROMPT.telegram(), "")
+            .replace(str(MeowCommand.PROMPT), "")
+            .strip(),
+            channel="telegram",
+            destination=json.dumps((update.effective_chat.id, update.message.id)),
+        )
 
 
 async def say_create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

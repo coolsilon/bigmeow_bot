@@ -1,18 +1,21 @@
 import asyncio
 import contextlib
 import queue
-import secrets
 import threading
 from datetime import date
 from enum import Enum
 from functools import partial
 from io import BytesIO
+from os import environ
 from random import choice, randint, shuffle
 from typing import Any, NamedTuple
 
 import structlog
+from dotenv import load_dotenv
 
 logger = structlog.get_logger()
+
+load_dotenv()
 
 
 # TODO use proper typing and abstrct to abstract class in py3.12
@@ -43,6 +46,24 @@ class Event(threading.Event):
         while True:
             task = asyncio.get_event_loop().run_in_executor(
                 None, partial(super().wait, timeout)
+            )
+            await task
+
+            if result := task.result():
+                return result
+
+
+class PEvent:
+    def __init__(self, event: threading.Event) -> None:
+        self.event = event
+
+    def set(self):
+        self.event.set()
+
+    async def wait(self, timeout: int | None = 5) -> bool:
+        while True:
+            task = asyncio.get_event_loop().run_in_executor(
+                None, partial(self.event.wait, timeout)
             )
             await task
 
@@ -95,6 +116,33 @@ class Lock(contextlib.AbstractAsyncContextManager):
 
     def locked(self) -> bool:
         return self.lock.locked()
+
+
+class PQueue:
+    def __init__(self, queue) -> None:
+        self.queue = queue
+
+    async def put(
+        self, item: dict[Any, Any], block: bool = True, timeout: int | None = None
+    ) -> None:
+        task = asyncio.get_event_loop().run_in_executor(
+            None, partial(self.queue.put, item, block, timeout)
+        )
+        await task
+
+        return task.result()
+
+    async def get(self, block: bool = True, timeout: int | None = 5) -> dict[Any, Any]:
+        while True:
+            task = asyncio.get_event_loop().run_in_executor(
+                None, partial(self.queue.get, block, timeout)
+            )
+
+            with contextlib.suppress(queue.Empty):
+                await task
+
+            if task.done() and task.exception() is None:
+                return task.result()
 
 
 class Fact_Cache:
@@ -167,7 +215,7 @@ latest_cache, latest_lock = (
 
 CACHE_LIMIT = 5
 DATE_FORMAT = "%d/%m/%Y"
-SECRET_TOKEN = secrets.token_hex(128)
+WEB_TELEGRAM_TOKEN = environ["WEB_TELEGRAM_TOKEN"]
 
 telegram_updates = asyncio.Queue()
 

@@ -1,10 +1,9 @@
 import asyncio
-import os
+import multiprocessing
 import signal
 import threading
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from functools import partial
-from typing import Any
 
 import structlog
 from dotenv import load_dotenv
@@ -19,100 +18,108 @@ load_dotenv()
 logger = structlog.get_logger()
 
 
-def done_handler(task: Future, exit_event: settings.Event) -> None:
-    if task.exception() is not None:
-        logger.exception(task.exception())
-
-    shutdown_handler_threadpool(None, None, exit_event)
-
-
-def exception_handler(
-    loop: asyncio.AbstractEventLoop, context: dict[str, Any], exit_event: asyncio.Event
+def done_handler(
+    future: Future,
+    name: str,
+    exit_event: settings.Event | settings.PEvent,
+    is_process=False,
 ) -> None:
-    try:
-        logger.exception(context["exception"])
-    except KeyError:
-        logger.error(context["message"])
+    logger.info(
+        "MAIN: Task is done, prompting others to quit",
+        name=name,
+        is_process=is_process,
+        future=future,
+    )
 
-    logger.error("MAIN: Shutting down")
-    asyncio.create_task(shutdown_handler(loop, exit_event))
+    if future.exception() is not None:
+        logger.exception(future.exception())
+
+    shutdown_handler(None, None, exit_event, is_process)
 
 
-async def shutdown_handler(
-    loop: asyncio.AbstractEventLoop, exit_event: asyncio.Event
+def shutdown_handler(
+    _signum, _frame, exit_event: settings.Event | settings.PEvent, is_process=False
 ) -> None:
-    logger.info("MAIN: Sending exit event")
-    exit_event.set()
-
-    await asyncio.sleep(5)
-
-    tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
-
-    for task in tasks:
-        task.cancel()
-
-    await asyncio.gather(*tasks, return_exceptions=True)
-
-    loop.stop()
-
-def shutdown_handler_threadpool(_signum, _frame, exit_event: settings.Event) -> None:
-    logger.info("MAIN: Sending exit event")
+    logger.info("MAIN: Sending exit event to all tasks in pool")
     exit_event.set()
 
 
-def threading_setup():
+def multiprocess_setup() -> None:
     settings.cat_lock = settings.Lock(threading.Lock())
     settings.fact_lock = settings.Lock(threading.Lock())
     settings.latest_lock = settings.Lock(threading.Lock())
-    settings.telegram_updates = settings.Queue()
 
-    settings.discord_messages = settings.Queue()
-    settings.telegram_messages = settings.Queue()
-
-
-def main() -> None:
-    loop, exit_event = asyncio.get_event_loop(), asyncio.Event()
-
-    loop.set_exception_handler(partial(exception_handler, exit_event=exit_event))
-
-    for s in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(
-            s,
-            lambda: asyncio.create_task(shutdown_handler(loop, exit_event)),
-        )
-
-    try:
-        loop.create_task(telegram_run(exit_event))
-        loop.create_task(discord_run(exit_event))
-        loop.create_task(web_run(exit_event))
-        loop.run_forever()
-    finally:
-        loop.close()
+    settings.telegram_updates = settings.PQueue(multiprocessing.Queue())
+    settings.discord_messages = settings.PQueue(multiprocessing.Queue())
+    settings.telegram_messages = settings.PQueue(multiprocessing.Queue())
 
 
-def main_threadpool() -> None:
-    threading_setup()
-
+async def bot_run(pexit_event: settings.PEvent) -> None:
     exit_event = settings.Event()
 
     with ThreadPoolExecutor(max_workers=10) as executor:
+        task_submit(
+            executor,
+            exit_event,
+            "bot.telegram",
+            lambda: asyncio.run(telegram_run(exit_event)),
+        )
+        task_submit(
+            executor,
+            exit_event,
+            "bot.discord",
+            lambda: asyncio.run(discord_run(exit_event)),
+        )
+
+        await pexit_event.wait()
+
+        logger.info("MAIN: Received process exit signal, sending exit event to threads")
+        exit_event.set()
+
+
+def process_run(func, pexit_event: settings.PEvent) -> None:
+    asyncio.run(func(pexit_event))
+
+
+def task_submit(
+    executor: ProcessPoolExecutor | ThreadPoolExecutor,
+    exit_event: settings.PEvent | settings.Event,
+    name: str,
+    *task,
+) -> Future:
+    is_process, future = (
+        isinstance(executor, ProcessPoolExecutor),
+        executor.submit(*task),
+    )
+
+    future.add_done_callback(
+        partial(
+            done_handler,
+            name=name,
+            is_process=is_process,
+            exit_event=exit_event,
+        )
+    )
+    logger.info(
+        "MAIN: Task is submitted", name=name, is_process=is_process, future=future
+    )
+
+    return future
+
+
+def main():
+    multiprocess_setup()
+
+    manager = multiprocessing.Manager()
+    pexit_event = settings.PEvent(manager.Event())
+
+    with ProcessPoolExecutor(max_workers=3) as executor:
         for s in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):
-            signal.signal(
-                s, partial(shutdown_handler_threadpool, exit_event=exit_event)
-            )
+            signal.signal(s, partial(shutdown_handler, exit_event=pexit_event))
 
-        tasks = [
-            executor.submit(lambda: asyncio.run(telegram_run(exit_event))),
-            executor.submit(lambda: asyncio.run(discord_run(exit_event))),
-            executor.submit(lambda: asyncio.run(web_run(exit_event))),
-        ]
-
-        for task in tasks:
-            task.add_done_callback(partial(done_handler, exit_event=exit_event))
+        task_submit(executor, pexit_event, "bot", process_run, bot_run, pexit_event)
+        task_submit(executor, pexit_event, "web", process_run, web_run, pexit_event)
 
 
 if __name__ == "__main__":
-    if os.environ.get("MEOW_THREADS", "False").upper() == "TRUE":
-        main_threadpool()
-    else:
-        main()
+    main()

@@ -6,8 +6,8 @@ from os import environ
 from random import choice
 from typing import Callable
 
+import aiohttp
 import structlog
-from aiohttp import ClientSession
 from cowsay import cowsay, cowthink
 from dotenv import load_dotenv
 
@@ -26,11 +26,11 @@ def meow_sayify(func: Callable) -> Callable:
 
 
 @meow_sayify
-async def meow_blockedornot(session: ClientSession, query: str) -> str:
+async def meow_blockedornot(query: str) -> str:
     url = "https://blockedornot.sinarproject.org/api/"
 
     logger.info("MEOW: Fetching blocked query", url=url, query=query)
-    async with session.get(url, params={"query": query}) as response:
+    async with aiohttp.request("GET", url, params={"query": query}) as response:
         result = [f"Website {query} is safe."]
 
         response_data = await response.json()
@@ -61,11 +61,11 @@ def meowpetrol_update_latest(current: Latest, incoming: Level | Change) -> Lates
 
 
 @meow_sayify
-async def meow_fact(session: ClientSession) -> str:
+async def meow_fact() -> str:
     url = "https://meowfacts.herokuapp.com/"
 
     logger.info("MEOW: Fetching a cat fact", url=url)
-    async with session.get(url) as response:
+    async with aiohttp.request("GET", url) as response:
         response_data = await response.json()
 
         async with settings.fact_lock:
@@ -79,13 +79,13 @@ async def meow_fact(session: ClientSession) -> str:
 
 
 @meow_sayify
-async def meow_petrol(session: ClientSession) -> str:
+async def meow_petrol() -> str:
     url = "https://storage.data.gov.my/commodities/fuelprice.csv"
 
     async with settings.latest_lock:
         if (settings.latest_cache.level.date + timedelta(days=6)) < date.today():
             logger.info("MEOW: Fetching the fuel price list", url=url)
-            async with session.get(url) as response:
+            async with aiohttp.request("GET", url) as response:
                 settings.latest_cache = reduce(
                     meowpetrol_update_latest,
                     [
@@ -126,11 +126,11 @@ async def meow_petrol(session: ClientSession) -> str:
         )
 
 
-async def meow_fetch_photo(session: ClientSession) -> BytesIO:
+async def meow_fetch_photo() -> BytesIO:
     url = "https://cataas.com/cat/says/meow?type=square"
 
     logger.info("MEOW: Fetching a cat photo", url=url)
-    async with session.get(url) as response:
+    async with aiohttp.request("GET", url) as response:
         async with settings.cat_lock:
             return (
                 settings.cat_cache.cache(BytesIO(await response.read()))
@@ -139,14 +139,12 @@ async def meow_fetch_photo(session: ClientSession) -> BytesIO:
             )
 
 
-async def meow_prompt(
-    session: ClientSession, message: str, channel: str, destination: str
-) -> None:
+async def meow_prompt(message: str, channel: str, destination: str) -> None:
     url = f"https://maker.ifttt.com/trigger/prompt/with/key/{environ.get('IFTTT_KEY')}"
     data = {"value1": message, "value2": channel, "value3": destination}
 
     logger.info("MEOW: Sending IFTTT request", ifttt_event="prompt", data=data)
-    async with session.post(url, json=data) as response:
+    async with aiohttp.request("POST", url, json=data) as response:
         logger.info("MEOW: IFTTT response", response=await response.text())
 
 
