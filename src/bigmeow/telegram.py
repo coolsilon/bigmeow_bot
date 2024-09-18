@@ -181,7 +181,7 @@ async def setup() -> None:
         application.bot.set_webhook(
             f'{os.environ["WEBHOOK_URL"]}/telegram',
             allowed_updates=Update.ALL_TYPES,
-            secret_token=settings.SECRET_TOKEN,
+            secret_token=settings.WEB_TELEGRAM_TOKEN,
         )
     )
 
