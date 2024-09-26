@@ -88,10 +88,12 @@ async def on_message(message: discord.Message) -> None:
         )
 
     elif message_contains(message.content, str(MeowCommand.PROMPT)):
-        await meow_prompt(
-            message.content.replace(str(MeowCommand.PROMPT), "").strip(),
-            channel="discord",
-            destination=json.dumps((message.channel.id, message.id)),
+        asyncio.create_task(
+            meow_prompt(
+                message.content.replace(str(MeowCommand.PROMPT), "").strip(),
+                channel="discord",
+                destination=json.dumps((message.channel.id, message.id)),
+            )
         )
 
     elif message_contains(message.content, str(MeowCommand.THINK)):

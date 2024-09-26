@@ -1,7 +1,10 @@
 import asyncio
+import hmac
 import json
 import os
-from typing import Annotated
+from hashlib import sha256
+from time import time
+from typing import Annotated, Any
 
 import aiohttp
 import structlog
@@ -86,6 +89,17 @@ async def run(exit_event: settings.PEvent) -> None:
     logger.info("WEB: Webserver is stopping")
     await server.shutdown()
 
+def slack_verify_request(payload: str, timestamp: int, signature: str) -> bool:
+    return abs(time() - timestamp) < 300 and (
+        "v0={}".format(
+            hmac.new(
+                os.environ["SLACK_SECRET_SIGN"].encode(),
+                ":".join(("v0", str(timestamp), payload)).encode(),
+                sha256,
+            ).hexdigest()
+        )
+        == signature
+    )
 
 #
 # routes
@@ -106,9 +120,30 @@ async def pong_get(authorization: Annotated[str, Header()]) -> str:
 
     return "pong"
 
+@app.post("/slack", include_in_schema=False)
+async def slack_webhook(
+    request: Request,
+    x_slack_signature: Annotated[str, Header()],
+    x_slack_request_timestamp: Annotated[int, Header()],
+) -> Any:
+    assert slack_verify_request(
+        (await request.body()).decode(), x_slack_request_timestamp, x_slack_signature
+    )
+
+    data = await request.json()
+
+    match data["type"]:
+        case "url_verification":
+            return data["challenge"]
+
+        case "event_callback" if data.get("event", {}).get("type", "") == "message":
+            logger.info("WEBHOOK: Webhook receives a slack message event")
+
+            asyncio.create_task(settings.slack_updates.put(data))
+
 
 @app.post("/telegram", include_in_schema=False)
-async def telegram_post(
+async def telegram_webhook(
     request: Request, x_telegram_bot_api_secret_token: Annotated[str, Header()]
 ) -> None:
     if not settings.WEB_TELEGRAM_TOKEN == x_telegram_bot_api_secret_token:
@@ -127,7 +162,7 @@ async def chat_post(
     text = (await request.body()).decode()
 
     logger.info(
-        "Sending chat message",
+        "WEBHOOK: Sending chat message",
         channel=x_channel,
         destination=x_destination,
         text=text,
@@ -156,6 +191,19 @@ async def chat_post(
                         "content": meow_say(text),
                         "channel_id": channel_id,
                         "message_id": message_id,
+                    }
+                )
+            )
+
+        case "slack":
+            channel_id, message_id = json.loads(x_destination)
+            asyncio.create_task(
+                settings.slack_messages.put(
+                    {
+                        "channel": channel_id,
+                        "thread_ts": message_id,
+                        "text": meow_say(text),
+                        "reply_broadcast": True,
                     }
                 )
             )

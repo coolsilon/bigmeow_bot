@@ -1,7 +1,6 @@
 import asyncio
 import multiprocessing
 import signal
-import threading
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from functools import partial
 
@@ -10,6 +9,7 @@ from dotenv import load_dotenv
 
 import bigmeow.settings as settings
 from bigmeow.discord import run as discord_run
+from bigmeow.slack import run as slack_run
 from bigmeow.telegram import run as telegram_run
 from bigmeow.web import run as web_run
 
@@ -44,16 +44,6 @@ def shutdown_handler(
     exit_event.set()
 
 
-def multiprocess_setup() -> None:
-    settings.cat_lock = settings.Lock(threading.Lock())
-    settings.fact_lock = settings.Lock(threading.Lock())
-    settings.latest_lock = settings.Lock(threading.Lock())
-
-    settings.telegram_updates = settings.PQueue(multiprocessing.Queue())
-    settings.discord_messages = settings.PQueue(multiprocessing.Queue())
-    settings.telegram_messages = settings.PQueue(multiprocessing.Queue())
-
-
 async def bot_run(pexit_event: settings.PEvent) -> None:
     exit_event = settings.Event()
 
@@ -69,6 +59,12 @@ async def bot_run(pexit_event: settings.PEvent) -> None:
             exit_event,
             "bot.discord",
             lambda: asyncio.run(discord_run(exit_event)),
+        )
+        task_submit(
+            executor,
+            exit_event,
+            "bot.slack",
+            lambda: asyncio.run(slack_run(exit_event)),
         )
 
         await pexit_event.wait()
@@ -108,8 +104,6 @@ def task_submit(
 
 
 def main():
-    multiprocess_setup()
-
     manager = multiprocessing.Manager()
     pexit_event = settings.PEvent(manager.Event())
 

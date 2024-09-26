@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import multiprocessing
 import queue
 import threading
 from datetime import date
@@ -57,7 +58,7 @@ class PEvent:
     def __init__(self, event: threading.Event) -> None:
         self.event = event
 
-    def set(self):
+    def set(self) -> None:
         self.event.set()
 
     async def wait(self, timeout: int | None = 5) -> bool:
@@ -69,30 +70,6 @@ class PEvent:
 
             if result := task.result():
                 return result
-
-
-class Queue(queue.Queue):
-    async def put(
-        self, item: dict[Any, Any], block: bool = True, timeout: int | None = None
-    ) -> None:
-        task = asyncio.get_event_loop().run_in_executor(
-            None, partial(super().put, item, block, timeout)
-        )
-        await task
-
-        return task.result()
-
-    async def get(self, block: bool = True, timeout: int | None = 5) -> dict[Any, Any]:
-        while True:
-            task = asyncio.get_event_loop().run_in_executor(
-                None, partial(super().get, block, timeout)
-            )
-
-            with contextlib.suppress(queue.Empty):
-                await task
-
-            if task.done() and task.exception() is None:
-                return task.result()
 
 
 class Lock(contextlib.AbstractAsyncContextManager):
@@ -118,7 +95,7 @@ class Lock(contextlib.AbstractAsyncContextManager):
         return self.lock.locked()
 
 
-class PQueue:
+class Queue:
     def __init__(self, queue) -> None:
         self.queue = queue
 
@@ -206,18 +183,20 @@ class MeowCommand(Enum):
         return f"{COMMAND_PREFIX}{self.value}"
 
 
-cat_cache, cat_lock = Cat_Cache(), asyncio.Lock()
-fact_cache, fact_lock = Fact_Cache(), asyncio.Lock()
+cat_cache, cat_lock = Cat_Cache(), Lock(threading.Lock())
+fact_cache, fact_lock = Fact_Cache(), Lock(threading.Lock())
 latest_cache, latest_lock = (
     Latest(Level(date.min, 0, 0, 0), Change(date.min, 0, 0, 0)),
-    asyncio.Lock(),
+    Lock(threading.Lock()),
 )
 
 CACHE_LIMIT = 5
 DATE_FORMAT = "%d/%m/%Y"
 WEB_TELEGRAM_TOKEN = environ["WEB_TELEGRAM_TOKEN"]
 
-telegram_updates = asyncio.Queue()
+telegram_updates = Queue(multiprocessing.Queue())
+slack_updates = Queue(multiprocessing.Queue())
 
-telegram_messages = asyncio.Queue()
-discord_messages = asyncio.Queue()
+telegram_messages = Queue(multiprocessing.Queue())
+discord_messages = Queue(multiprocessing.Queue())
+slack_messages = Queue(multiprocessing.Queue())

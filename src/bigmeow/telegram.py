@@ -109,6 +109,7 @@ async def messages_consume() -> None:
     global application
 
     while message := await settings.telegram_messages.get():
+        logger.info("TELEGRAM: Processing prompt reply")
         asyncio.create_task(application.bot.send_message(**message))
 
 
