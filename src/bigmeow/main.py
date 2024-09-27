@@ -3,8 +3,10 @@ import multiprocessing
 import signal
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from functools import partial
+from typing import Annotated
 
 import structlog
+import typer
 from dotenv import load_dotenv
 
 import bigmeow.settings as settings
@@ -44,23 +46,31 @@ def shutdown_handler(
     exit_event.set()
 
 
-async def bot_run(pexit_event: settings.PEvent) -> None:
+async def bot_run(
+    pexit_event: settings.PEvent,
+    run_telegram: bool = True,
+    run_slack: bool = True,
+    run_discord: bool = True,
+) -> None:
     exit_event = settings.Event()
 
     with ThreadPoolExecutor(max_workers=10) as executor:
         task_submit(
+            run_telegram,
             executor,
             exit_event,
             "bot.telegram",
             lambda: asyncio.run(telegram_run(exit_event)),
         )
         task_submit(
+            run_discord,
             executor,
             exit_event,
             "bot.discord",
             lambda: asyncio.run(discord_run(exit_event)),
         )
         task_submit(
+            run_slack,
             executor,
             exit_event,
             "bot.slack",
@@ -78,32 +88,39 @@ def process_run(func, pexit_event: settings.PEvent) -> None:
 
 
 def task_submit(
+    run: bool,
     executor: ProcessPoolExecutor | ThreadPoolExecutor,
     exit_event: settings.PEvent | settings.Event,
     name: str,
     *task,
-) -> Future:
-    is_process, future = (
-        isinstance(executor, ProcessPoolExecutor),
-        executor.submit(*task),
-    )
-
-    future.add_done_callback(
-        partial(
-            done_handler,
-            name=name,
-            is_process=is_process,
-            exit_event=exit_event,
+) -> Future | None:
+    if run:
+        is_process, future = (
+            isinstance(executor, ProcessPoolExecutor),
+            executor.submit(*task),
         )
-    )
-    logger.info(
-        "MAIN: Task is submitted", name=name, is_process=is_process, future=future
-    )
 
-    return future
+        future.add_done_callback(
+            partial(
+                done_handler,
+                name=name,
+                is_process=is_process,
+                exit_event=exit_event,
+            )
+        )
+        logger.info(
+            "MAIN: Task is submitted", name=name, is_process=is_process, future=future
+        )
+
+        return future
 
 
-def main():
+def main(
+    run_web: Annotated[bool, typer.Option(" /--noweb")] = True,
+    run_discord: Annotated[bool, typer.Option(" /--nodiscord")] = True,
+    run_telegram: Annotated[bool, typer.Option(" /--notg")] = True,
+    run_slack: Annotated[bool, typer.Option(" /--noslack")] = True,
+) -> None:
     manager = multiprocessing.Manager()
     pexit_event = settings.PEvent(manager.Event())
 
@@ -111,9 +128,25 @@ def main():
         for s in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):
             signal.signal(s, partial(shutdown_handler, exit_event=pexit_event))
 
-        task_submit(executor, pexit_event, "bot", process_run, bot_run, pexit_event)
-        task_submit(executor, pexit_event, "web", process_run, web_run, pexit_event)
+        task_submit(
+            True,
+            executor,
+            pexit_event,
+            "bot",
+            process_run,
+            partial(
+                bot_run,
+                run_discord=run_discord,
+                run_telegram=run_telegram,
+                run_slack=run_slack,
+            ),
+            pexit_event,
+        )
+
+        task_submit(
+            run_web, executor, pexit_event, "web", process_run, web_run, pexit_event
+        )
 
 
 if __name__ == "__main__":
-    main()
+    typer.run(main)
