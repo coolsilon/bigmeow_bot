@@ -1,8 +1,8 @@
 import asyncio
 import json
-from os import environ
 
 from dotenv import load_dotenv
+from slack_sdk.oauth.installation_store import FileInstallationStore
 from slack_sdk.web.async_client import AsyncWebClient
 from structlog import get_logger
 
@@ -22,19 +22,33 @@ load_dotenv()
 logger = get_logger()
 
 
+async def get_client(
+    store: FileInstallationStore, team_id: str
+) -> AsyncWebClient | None:
+    bot = await store.async_find_bot(enterprise_id=None, team_id=team_id)
+
+    if not bot:
+        return None
+
+    return AsyncWebClient(token=bot.bot_token)
+
+
 async def run(exit_event: settings.Event) -> None:
     logger.info("SLACK: Starting")
-    client = AsyncWebClient(token=environ["SLACK_TOKEN_BOT"])
 
-    asyncio.create_task(updates_consume(client))
-    asyncio.create_task(message_consume(client))
+    store_installation = FileInstallationStore(base_dir=str(settings.data_path_slack))
+
+    asyncio.create_task(updates_consume(store_installation))
+    asyncio.create_task(message_consume(store_installation))
 
     await exit_event.wait()
 
 
-async def updates_consume(client: AsyncWebClient):
+async def updates_consume(store: FileInstallationStore) -> None:
     while update := await settings.slack_updates.get():
-        if not update["event"].get("text"):
+        client = await get_client(store, update["team_id"])
+
+        if not update["event"].get("text") or not client:
             continue
 
         if message_contains(update["event"]["text"], str(MeowCommand.SAY)):
@@ -110,7 +124,11 @@ async def updates_consume(client: AsyncWebClient):
                     .strip(),
                     channel="slack",
                     destination=json.dumps(
-                        (update["event"]["channel"], update["event"]["ts"])
+                        (
+                            update["team_id"],
+                            update["event"]["channel"],
+                            update["event"]["ts"],
+                        )
                     ),
                 )
             )
@@ -119,7 +137,12 @@ async def updates_consume(client: AsyncWebClient):
             pass
 
 
-async def message_consume(client: AsyncWebClient) -> None:
+async def message_consume(store: FileInstallationStore) -> None:
     while message := await settings.slack_messages.get():
+        client = await get_client(store, message["team_id"])
+
+        if not client:
+            continue
+
         logger.info("SLACK: Processing prompt reply")
-        asyncio.create_task(client.chat_postMessage(**message))
+        asyncio.create_task(client.chat_postMessage(**message["payload"]))

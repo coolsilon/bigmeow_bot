@@ -18,4 +18,6 @@ EXPOSE 8080
 
 COPY --from=builder /venv /venv
 
+VOLUME /data
+
 ENTRYPOINT ["/venv/bin/python", "-m", "bigmeow.main"]

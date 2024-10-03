@@ -8,6 +8,7 @@ from enum import Enum
 from functools import partial
 from io import BytesIO
 from os import environ
+from pathlib import Path
 from random import choice, randint, shuffle
 from typing import Any, NamedTuple
 
@@ -200,3 +201,6 @@ slack_updates = Queue(multiprocessing.Queue())
 telegram_messages = Queue(multiprocessing.Queue())
 discord_messages = Queue(multiprocessing.Queue())
 slack_messages = Queue(multiprocessing.Queue())
+
+data_path = Path(environ.get("DATA_PATH", "/data"))
+data_path_slack = data_path / "slack"

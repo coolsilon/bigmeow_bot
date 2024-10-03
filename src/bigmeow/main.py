@@ -3,6 +3,7 @@ import multiprocessing
 import signal
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from functools import partial
+from os import makedirs
 from typing import Annotated
 
 import structlog
@@ -123,6 +124,9 @@ def main(
 ) -> None:
     manager = multiprocessing.Manager()
     pexit_event = settings.PEvent(manager.Event())
+
+    if run_slack:
+        makedirs(settings.data_path_slack, exist_ok=True)
 
     with ProcessPoolExecutor(max_workers=3) as executor:
         for s in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):
