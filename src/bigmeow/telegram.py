@@ -115,7 +115,7 @@ async def messages_consume() -> None:
     while True:
         with suppress(queue.Empty):
             message = await asyncio.to_thread(
-                partial(settings.telegram_messages.get, timeout=5)
+                partial(settings.telegram_messages.get, timeout=settings.QUEUE_TIMEOUT)
             )
 
             logger.info("TELEGRAM: Processing prompt reply")
@@ -255,7 +255,10 @@ async def updates_consume() -> None:
                 application.update_queue.put(
                     Update.de_json(
                         await asyncio.to_thread(
-                            partial(settings.telegram_updates.get, timeout=5)
+                            partial(
+                                settings.telegram_updates.get,
+                                timeout=settings.QUEUE_TIMEOUT,
+                            )
                         ),
                         application.bot,
                     )

@@ -52,7 +52,7 @@ async def updates_consume(store: FileInstallationStore) -> None:
     while True:
         try:
             update = await asyncio.to_thread(
-                partial(settings.slack_updates.get, timeout=5)
+                partial(settings.slack_updates.get, timeout=settings.QUEUE_TIMEOUT)
             )
         except queue.Empty:
             continue
@@ -152,7 +152,7 @@ async def message_consume(store: FileInstallationStore) -> None:
     while True:
         with suppress(queue.Empty):
             message = await asyncio.to_thread(
-                partial(settings.slack_messages.get, timeout=5)
+                partial(settings.slack_messages.get, timeout=settings.QUEUE_TIMEOUT)
             )
 
             client = await get_client(store, message["team_id"])

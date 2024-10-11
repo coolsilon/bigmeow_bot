@@ -133,6 +133,8 @@ CACHE_LIMIT = 5
 DATE_FORMAT = "%d/%m/%Y"
 WEB_TELEGRAM_TOKEN = environ["WEB_TELEGRAM_TOKEN"]
 
+QUEUE_TIMEOUT = int(environ.get("QUEUE_TIMEOUT", 5))
+
 telegram_updates = multiprocessing.Queue()
 slack_updates = multiprocessing.Queue()
 

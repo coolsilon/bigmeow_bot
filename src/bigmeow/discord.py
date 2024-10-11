@@ -57,7 +57,7 @@ async def messages_consume() -> None:
     while True:
         with suppress(queue.Empty):
             data = await asyncio.to_thread(
-                partial(settings.discord_messages.get, timeout=5)
+                partial(settings.discord_messages.get, timeout=settings.QUEUE_TIMEOUT)
             )
 
             logger.info("DISCORD: Processing messages from queue", data=data)
