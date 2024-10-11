@@ -9,6 +9,7 @@ from typing import Annotated
 
 import structlog
 import typer
+import uvloop
 from dotenv import load_dotenv
 
 import bigmeow.settings as settings
@@ -62,21 +63,21 @@ async def bot_run(
             executor,
             exit_event,
             "bot.telegram",
-            lambda: asyncio.run(telegram_run(exit_event)),
+            partial(process_run, telegram_run, exit_event),
         )
         task_submit(
             run_discord,
             executor,
             exit_event,
             "bot.discord",
-            lambda: asyncio.run(discord_run(exit_event)),
+            partial(process_run, discord_run, exit_event),
         )
         task_submit(
             run_slack,
             executor,
             exit_event,
             "bot.slack",
-            lambda: asyncio.run(slack_run(exit_event)),
+            partial(process_run, slack_run, exit_event),
         )
 
         await asyncio.to_thread(pexit_event.wait)
@@ -86,7 +87,7 @@ async def bot_run(
 
 
 def process_run(func, pexit_event: threading.Event) -> None:
-    asyncio.run(func(pexit_event))
+    uvloop.run(func(pexit_event))
 
 
 def task_submit(
