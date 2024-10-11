@@ -1,6 +1,8 @@
 import asyncio
 import json
 import os
+import threading
+from functools import partial
 from html import escape
 from typing import Annotated, Any
 
@@ -65,7 +67,7 @@ def check_login_is_valid(authorization: str | None) -> bool:
     return result
 
 
-async def run(exit_event: settings.PEvent) -> None:
+async def run(exit_event: threading.Event) -> None:
     is_debug = check_is_debug()
 
     server = uvicorn.Server(
@@ -87,7 +89,7 @@ async def run(exit_event: settings.PEvent) -> None:
     else:
         raise Exception("Website is unreachable")
 
-    await exit_event.wait()
+    await asyncio.to_thread(exit_event.wait)
 
     logger.info("WEB: Webserver is stopping")
     await server.shutdown()
@@ -235,7 +237,9 @@ async def slack_webhook(
         case "event_callback" if data.get("event", {}).get("type", "") == "message":
             logger.info("WEBHOOK: Webhook receives a slack message event")
 
-            asyncio.create_task(settings.slack_updates.put(data))
+            asyncio.create_task(
+                asyncio.to_thread(partial(settings.slack_updates.put, data))
+            )
 
 
 @app.post("/telegram", include_in_schema=False)
@@ -246,7 +250,11 @@ async def telegram_webhook(
         return
 
     logger.info("WEBHOOK: Webhook receives a telegram request")
-    asyncio.create_task(settings.telegram_updates.put(await request.json()))
+    asyncio.create_task(
+        asyncio.to_thread(
+            partial(settings.telegram_updates.put, await request.json()),
+        )
+    )
 
 
 @app.post("/chat", include_in_schema=False)
@@ -268,42 +276,51 @@ async def chat_post(
             chat_id, message_id = json.loads(x_destination)
 
             asyncio.create_task(
-                settings.telegram_messages.put(
-                    {
-                        "text": meow_say(text),
-                        "chat_id": chat_id,
-                        "parse_mode": ParseMode.MARKDOWN,
-                        "reply_to_message_id": message_id,
-                        "allow_sending_without_reply": True,
-                    }
+                asyncio.to_thread(
+                    partial(
+                        settings.telegram_messages.put,
+                        {
+                            "text": meow_say(text),
+                            "chat_id": chat_id,
+                            "parse_mode": ParseMode.MARKDOWN,
+                            "reply_to_message_id": message_id,
+                            "allow_sending_without_reply": True,
+                        },
+                    )
                 )
             )
 
         case "discord":
             channel_id, message_id = json.loads(x_destination)
             asyncio.create_task(
-                settings.discord_messages.put(
-                    {
-                        "content": meow_say(text),
-                        "channel_id": channel_id,
-                        "message_id": message_id,
-                    }
+                asyncio.to_thread(
+                    partial(
+                        settings.discord_messages.put,
+                        {
+                            "content": meow_say(text),
+                            "channel_id": channel_id,
+                            "message_id": message_id,
+                        },
+                    )
                 )
             )
 
         case "slack":
             team_id, channel_id, message_id = json.loads(x_destination)
             asyncio.create_task(
-                settings.slack_messages.put(
-                    {
-                        "team_id": team_id,
-                        "payload": {
-                            "channel": channel_id,
-                            "thread_ts": message_id,
-                            "text": meow_say(text),
-                            "reply_broadcast": True,
+                asyncio.to_thread(
+                    partial(
+                        settings.slack_messages.put,
+                        {
+                            "team_id": team_id,
+                            "payload": {
+                                "channel": channel_id,
+                                "thread_ts": message_id,
+                                "text": meow_say(text),
+                                "reply_broadcast": True,
+                            },
                         },
-                    }
+                    )
                 )
             )
 

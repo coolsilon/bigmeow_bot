@@ -1,6 +1,7 @@
 import asyncio
 import multiprocessing
 import signal
+import threading
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from functools import partial
 from os import makedirs
@@ -24,7 +25,7 @@ logger = structlog.get_logger()
 def done_handler(
     future: Future,
     name: str,
-    exit_event: settings.Event | settings.PEvent,
+    exit_event: threading.Event,
     is_process=False,
 ) -> None:
     logger.info(
@@ -41,19 +42,19 @@ def done_handler(
 
 
 def shutdown_handler(
-    _signum, _frame, exit_event: settings.Event | settings.PEvent, is_process=False
+    _signum, _frame, exit_event: threading.Event, is_process=False
 ) -> None:
     logger.info("MAIN: Sending exit event to all tasks in pool")
     exit_event.set()
 
 
 async def bot_run(
-    pexit_event: settings.PEvent,
+    pexit_event: threading.Event,
     run_telegram: bool = True,
     run_slack: bool = True,
     run_discord: bool = True,
 ) -> None:
-    exit_event = settings.Event()
+    exit_event = threading.Event()
 
     with ThreadPoolExecutor(max_workers=10) as executor:
         task_submit(
@@ -78,20 +79,20 @@ async def bot_run(
             lambda: asyncio.run(slack_run(exit_event)),
         )
 
-        await pexit_event.wait()
+        await asyncio.to_thread(pexit_event.wait)
 
         logger.info("MAIN: Received process exit signal, sending exit event to threads")
         exit_event.set()
 
 
-def process_run(func, pexit_event: settings.PEvent) -> None:
+def process_run(func, pexit_event: threading.Event) -> None:
     asyncio.run(func(pexit_event))
 
 
 def task_submit(
     run: bool,
     executor: ProcessPoolExecutor | ThreadPoolExecutor,
-    exit_event: settings.PEvent | settings.Event,
+    exit_event: threading.Event,
     name: str,
     *task,
 ) -> Future | None:
@@ -123,7 +124,7 @@ def main(
     run_slack: Annotated[bool, typer.Option(" /--noslack")] = True,
 ) -> None:
     manager = multiprocessing.Manager()
-    pexit_event = settings.PEvent(manager.Event())
+    pexit_event = manager.Event()
 
     if run_slack:
         makedirs(settings.data_path_slack, exist_ok=True)

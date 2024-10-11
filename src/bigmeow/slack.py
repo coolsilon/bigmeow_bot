@@ -1,5 +1,9 @@
 import asyncio
 import json
+import queue
+import threading
+from contextlib import suppress
+from functools import partial
 
 from dotenv import load_dotenv
 from slack_sdk.oauth.installation_store import FileInstallationStore
@@ -33,7 +37,7 @@ async def get_client(
     return AsyncWebClient(token=bot.bot_token)
 
 
-async def run(exit_event: settings.Event) -> None:
+async def run(exit_event: threading.Event) -> None:
     logger.info("SLACK: Starting")
 
     store_installation = FileInstallationStore(base_dir=str(settings.data_path_slack))
@@ -41,11 +45,18 @@ async def run(exit_event: settings.Event) -> None:
     asyncio.create_task(updates_consume(store_installation))
     asyncio.create_task(message_consume(store_installation))
 
-    await exit_event.wait()
+    await asyncio.to_thread(exit_event.wait)
 
 
 async def updates_consume(store: FileInstallationStore) -> None:
-    while update := await settings.slack_updates.get():
+    while True:
+        try:
+            update = await asyncio.to_thread(
+                partial(settings.slack_updates.get, timeout=5)
+            )
+        except queue.Empty:
+            continue
+
         client = await get_client(store, update["team_id"])
 
         if not update["event"].get("text") or not client:
@@ -138,11 +149,16 @@ async def updates_consume(store: FileInstallationStore) -> None:
 
 
 async def message_consume(store: FileInstallationStore) -> None:
-    while message := await settings.slack_messages.get():
-        client = await get_client(store, message["team_id"])
+    while True:
+        with suppress(queue.Empty):
+            message = await asyncio.to_thread(
+                partial(settings.slack_messages.get, timeout=5)
+            )
 
-        if not client:
-            continue
+            client = await get_client(store, message["team_id"])
 
-        logger.info("SLACK: Processing prompt reply")
-        asyncio.create_task(client.chat_postMessage(**message["payload"]))
+            if not client:
+                continue
+
+            logger.info("SLACK: Processing prompt reply")
+            asyncio.create_task(client.chat_postMessage(**message["payload"]))

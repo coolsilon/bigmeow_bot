@@ -1,6 +1,10 @@
 import asyncio
 import json
 import os
+import queue
+import threading
+from contextlib import suppress
+from functools import partial
 from io import StringIO
 
 import discord
@@ -34,14 +38,14 @@ def client_init() -> discord.Client:
 client = client_init()
 
 
-async def run(exit_event: asyncio.Event | settings.Event) -> None:
+async def run(exit_event: threading.Event) -> None:
     global client
 
     logger.info("DISCORD: Starting")
     async with client:
         asyncio.create_task(client.start(os.environ["DISCORD_TOKEN"]))
 
-        await exit_event.wait()
+        await asyncio.to_thread(exit_event.wait)
 
         logger.info("DISCORD: Stopping")
         await client.close()
@@ -50,23 +54,28 @@ async def run(exit_event: asyncio.Event | settings.Event) -> None:
 async def messages_consume() -> None:
     global client
 
-    while data := await settings.discord_messages.get():
-        logger.info("DISCORD: Processing messages from queue", data=data)
+    while True:
+        with suppress(queue.Empty):
+            data = await asyncio.to_thread(
+                partial(settings.discord_messages.get, timeout=5)
+            )
 
-        try:
-            channel = await client.fetch_channel(data["channel_id"])
-        except Exception as e:
-            logger.error("DISCORD: Invalid channel", data=data)
-            logger.exception(e)
-            continue
+            logger.info("DISCORD: Processing messages from queue", data=data)
 
-        try:
-            message = await channel.fetch_message(data["message_id"])  # type: ignore
-        except Exception:
-            logger.info("DISCORD: Unable to find message to reply to", data=data)
-            message = None
+            try:
+                channel = await client.fetch_channel(data["channel_id"])
+            except Exception as e:
+                logger.error("DISCORD: Invalid channel", data=data)
+                logger.exception(e)
+                continue
 
-        asyncio.create_task(text_send(data["content"], reference=message))  # type: ignore
+            try:
+                message = await channel.fetch_message(data["message_id"])  # type: ignore
+            except Exception:
+                logger.info("DISCORD: Unable to find message to reply to", data=data)
+                message = None
+
+            asyncio.create_task(text_send(data["content"], reference=message))  # type: ignore
 
 
 @client.event
