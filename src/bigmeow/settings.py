@@ -4,7 +4,6 @@ import multiprocessing
 import threading
 from datetime import date
 from enum import Enum
-from functools import partial
 from io import BytesIO
 from os import environ
 from pathlib import Path
@@ -53,10 +52,7 @@ class Lock(contextlib.AbstractAsyncContextManager):
         return self.release()
 
     async def acquire(self) -> bool:
-        task = asyncio.get_event_loop().run_in_executor(None, self.lock.acquire)
-        await task
-
-        return task.result()
+        return await asyncio.to_thread(self.lock.acquire)
 
     def release(self) -> None:
         self.lock.release()
