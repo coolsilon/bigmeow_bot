@@ -19,7 +19,7 @@ from telegram.ext import (
 )
 
 import bigmeow.settings as settings
-from bigmeow.common import check_is_debug, message_contains
+from bigmeow.common import check_is_debug, coroutine_repeat_queue, message_contains
 from bigmeow.meow import (
     meow_blockedornot,
     meow_fact,
@@ -112,14 +112,13 @@ async def message_filter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def messages_consume() -> None:
     global application
 
-    while True:
-        with suppress(queue.Empty):
-            message = await asyncio.to_thread(
-                partial(settings.telegram_messages.get, timeout=settings.QUEUE_TIMEOUT)
-            )
+    with suppress(queue.Empty):
+        message = await asyncio.to_thread(
+            partial(settings.telegram_messages.get, timeout=settings.QUEUE_TIMEOUT)
+        )
 
-            logger.info("TELEGRAM: Processing prompt reply")
-            asyncio.create_task(application.bot.send_message(**message))
+        logger.info("TELEGRAM: Processing prompt reply")
+        asyncio.create_task(application.bot.send_message(**message))
 
 
 async def petrol_fetch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -161,8 +160,8 @@ async def run(exit_event: threading.Event) -> None:
                 )
             )
 
-        asyncio.create_task(updates_consume())
-        asyncio.create_task(messages_consume())
+        asyncio.create_task(coroutine_repeat_queue(updates_consume))
+        asyncio.create_task(coroutine_repeat_queue(messages_consume))
 
         await asyncio.to_thread(exit_event.wait)
 
@@ -249,18 +248,17 @@ async def think_create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def updates_consume() -> None:
-    while True:
-        with suppress(queue.Empty):
-            asyncio.create_task(
-                application.update_queue.put(
-                    Update.de_json(
-                        await asyncio.to_thread(
-                            partial(
-                                settings.telegram_updates.get,
-                                timeout=settings.QUEUE_TIMEOUT,
-                            )
-                        ),
-                        application.bot,
-                    )
+    with suppress(queue.Empty):
+        asyncio.create_task(
+            application.update_queue.put(
+                Update.de_json(
+                    await asyncio.to_thread(
+                        partial(
+                            settings.telegram_updates.get,
+                            timeout=settings.QUEUE_TIMEOUT,
+                        )
+                    ),
+                    application.bot,
                 )
             )
+        )

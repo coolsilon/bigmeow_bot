@@ -12,7 +12,7 @@ import structlog
 from dotenv import load_dotenv
 
 import bigmeow.settings as settings
-from bigmeow.common import check_is_debug, message_contains
+from bigmeow.common import check_is_debug, coroutine_repeat_queue, message_contains
 from bigmeow.meow import (
     meow_blockedornot,
     meow_fact,
@@ -54,28 +54,26 @@ async def run(exit_event: threading.Event) -> None:
 async def messages_consume() -> None:
     global client
 
-    while True:
-        with suppress(queue.Empty):
-            data = await asyncio.to_thread(
-                partial(settings.discord_messages.get, timeout=settings.QUEUE_TIMEOUT)
-            )
+    with suppress(queue.Empty):
+        data = await asyncio.to_thread(
+            partial(settings.discord_messages.get, timeout=settings.QUEUE_TIMEOUT)
+        )
 
-            logger.info("DISCORD: Processing messages from queue", data=data)
+        logger.info("DISCORD: Processing messages from queue", data=data)
 
-            try:
-                channel = await client.fetch_channel(data["channel_id"])
-            except Exception as e:
-                logger.error("DISCORD: Invalid channel", data=data)
-                logger.exception(e)
-                continue
+        try:
+            channel = await client.fetch_channel(data["channel_id"])
+        except Exception as e:
+            logger.error("DISCORD: Invalid channel", data=data)
+            logger.exception(e)
 
-            try:
-                message = await channel.fetch_message(data["message_id"])  # type: ignore
-            except Exception:
-                logger.info("DISCORD: Unable to find message to reply to", data=data)
-                message = None
+        try:
+            message = await channel.fetch_message(data["message_id"])  # type: ignore
+        except Exception:
+            logger.info("DISCORD: Unable to find message to reply to", data=data)
+            message = None
 
-            asyncio.create_task(text_send(data["content"], reference=message))  # type: ignore
+        asyncio.create_task(text_send(data["content"], reference=message))  # type: ignore
 
 
 @client.event
@@ -161,7 +159,7 @@ async def on_ready() -> None:
                 user.send(f"Bot {client.user.mention} is up\n{meow_say('Hello~')}")
             )
 
-    asyncio.create_task(messages_consume())
+    asyncio.create_task(coroutine_repeat_queue(messages_consume))
 
 
 async def text_send(content: str, reference: discord.Message) -> None:

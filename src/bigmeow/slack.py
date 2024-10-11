@@ -11,7 +11,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 from structlog import get_logger
 
 from bigmeow import settings
-from bigmeow.common import message_contains
+from bigmeow.common import coroutine_repeat_queue, message_contains
 from bigmeow.meow import (
     meow_blockedornot,
     meow_fact,
@@ -42,25 +42,26 @@ async def run(exit_event: threading.Event) -> None:
 
     store_installation = FileInstallationStore(base_dir=str(settings.data_path_slack))
 
-    asyncio.create_task(updates_consume(store_installation))
-    asyncio.create_task(message_consume(store_installation))
+    asyncio.create_task(
+        coroutine_repeat_queue(partial(updates_consume, store_installation))
+    )
+    asyncio.create_task(
+        coroutine_repeat_queue(partial(message_consume, store_installation))
+    )
 
     await asyncio.to_thread(exit_event.wait)
 
 
 async def updates_consume(store: FileInstallationStore) -> None:
-    while True:
-        try:
-            update = await asyncio.to_thread(
-                partial(settings.slack_updates.get, timeout=settings.QUEUE_TIMEOUT)
-            )
-        except queue.Empty:
-            continue
+    with suppress(queue.Empty):
+        update = await asyncio.to_thread(
+            partial(settings.slack_updates.get, timeout=settings.QUEUE_TIMEOUT)
+        )
 
         client = await get_client(store, update["team_id"])
 
         if not update["event"].get("text") or not client:
-            continue
+            return
 
         if message_contains(update["event"]["text"], str(MeowCommand.SAY)):
             asyncio.create_task(
@@ -149,16 +150,15 @@ async def updates_consume(store: FileInstallationStore) -> None:
 
 
 async def message_consume(store: FileInstallationStore) -> None:
-    while True:
-        with suppress(queue.Empty):
-            message = await asyncio.to_thread(
-                partial(settings.slack_messages.get, timeout=settings.QUEUE_TIMEOUT)
-            )
+    with suppress(queue.Empty):
+        message = await asyncio.to_thread(
+            partial(settings.slack_messages.get, timeout=settings.QUEUE_TIMEOUT)
+        )
 
-            client = await get_client(store, message["team_id"])
+        client = await get_client(store, message["team_id"])
 
-            if not client:
-                continue
+        if not client:
+            return
 
-            logger.info("SLACK: Processing prompt reply")
-            asyncio.create_task(client.chat_postMessage(**message["payload"]))
+        logger.info("SLACK: Processing prompt reply")
+        asyncio.create_task(client.chat_postMessage(**message["payload"]))

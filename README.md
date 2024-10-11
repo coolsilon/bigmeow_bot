@@ -6,6 +6,7 @@ A dumb experimental bot done for no good reason
 
 * On discord: https://discord.com/oauth2/authorize?client_id=990077535066935357
 * On telegram: https://t.me/bigmeow_bot
+* On slack: https://bigmeow.coolsilon.com/slack/install
 
 ## What can BigMeow do?
 
@@ -15,7 +16,7 @@ A dumb experimental bot done for no good reason
 * `!meowfact`: Return a meow fact from https://github.com/wh-iterabb-it/meowfacts
 * `!meowisblocked domain.tld`: Perform a query to https://blockedornot.sinarproject.org/ to check if a domain is blocked in Malaysia
 * `!meowprompt prompt`: a reply to the supplied prompt, powered by https://ifttt.com/
-* If your message has a `meow` in it, a cat photo is fetched from https://cataas.com/
+* If your message has a `meow` in it, a cat photo is fetched from https://cataas.com/ (Currently not supported on slack)
 
 NOTE: all `!` commands can be replaced by `/` in telegram, e.g. `/meowsay hello world`.
 
@@ -35,7 +36,9 @@ TELEGRAM_USER=<OWNER TELEGRAM CHAT ID>
 WEBHOOK_URL=<URL TO WEBHOOK>
 DEBUG=<True IF RUNNING LOCALLY OTHERWISE False>
 IFTTT_KEY=<IFTTT_TOKEN>
-MEOW_THREADS=<True IF MULTITHREADING IS DESIRED OTHERWISE FALSE>
+SLACK_SECRET_SIGN=<SLACK SIGNING SECRET>
+SLACK_SECRET_CLIENT=<SLACK CLIENT SECRET>
+SLACK_CLIENT_ID=<SLACK CLIENT ID>
 ```
 
 ### Python
@@ -51,3 +54,12 @@ Then run it with
 ```
 $ poetry run python -m bigmeow.main
 ```
+
+Optionally, you can run the application with the following options:
+
+* `--noweb` to run without a web frontend
+* `--notg` to run without a telegram bot
+* `--nodiscord` to run without a discord bot
+* `--noslack` to run without a slack bot
+
+Notice slack and telegram bot would fail to receive event input without the web frontend
