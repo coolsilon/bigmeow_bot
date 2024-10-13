@@ -5,7 +5,7 @@ import threading
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from functools import partial
 from os import makedirs
-from typing import Annotated
+from typing import Annotated, Any, Callable
 
 import structlog
 import typer
@@ -22,11 +22,11 @@ load_dotenv()
 
 logger = structlog.get_logger()
 
-
 def done_handler(
     future: Future,
     name: str,
     exit_event: threading.Event,
+    logger: Any,
     is_process=False,
 ) -> None:
     logger.info(
@@ -39,11 +39,11 @@ def done_handler(
     if future.exception() is not None:
         logger.exception(future.exception())
 
-    shutdown_handler(None, None, exit_event, is_process)
+    shutdown_handler(None, None, exit_event, logger, is_process)
 
 
 def shutdown_handler(
-    _signum, _frame, exit_event: threading.Event, is_process=False
+    _signum, _frame, exit_event: threading.Event, logger: Any, is_process=False
 ) -> None:
     logger.info("MAIN: Sending exit event to all tasks in pool")
     exit_event.set()
@@ -51,9 +51,10 @@ def shutdown_handler(
 
 async def bot_run(
     pexit_event: threading.Event,
-    run_telegram: bool = True,
-    run_slack: bool = True,
-    run_discord: bool = True,
+    run_telegram: bool,
+    run_slack: bool,
+    run_discord: bool,
+    logger: Any,
 ) -> None:
     exit_event = threading.Event()
 
@@ -63,21 +64,14 @@ async def bot_run(
             executor,
             exit_event,
             "bot.telegram",
-            partial(process_run, telegram_run, exit_event),
+            telegram_run,
+            logger=logger,
         )
         task_submit(
-            run_discord,
-            executor,
-            exit_event,
-            "bot.discord",
-            partial(process_run, discord_run, exit_event),
+            run_discord, executor, exit_event, "bot.discord", discord_run, logger=logger
         )
         task_submit(
-            run_slack,
-            executor,
-            exit_event,
-            "bot.slack",
-            partial(process_run, slack_run, exit_event),
+            run_slack, executor, exit_event, "bot.slack", slack_run, logger=logger
         )
 
         await asyncio.to_thread(pexit_event.wait)
@@ -86,21 +80,22 @@ async def bot_run(
         exit_event.set()
 
 
-def process_run(func, pexit_event: threading.Event) -> None:
-    uvloop.run(func(pexit_event))
-
+def process_run(func, pexit_event: threading.Event, *arguments) -> None:
+    uvloop.run(func(pexit_event, *arguments))
 
 def task_submit(
     run: bool,
     executor: ProcessPoolExecutor | ThreadPoolExecutor,
     exit_event: threading.Event,
     name: str,
-    *task,
+    func: Callable[..., Any],
+    *arguments: Any,
+    logger: Any,
 ) -> Future | None:
     if run:
         is_process, future = (
             isinstance(executor, ProcessPoolExecutor),
-            executor.submit(*task),
+            executor.submit(process_run, func, exit_event, *arguments),
         )
 
         future.add_done_callback(
@@ -109,6 +104,7 @@ def task_submit(
                 name=name,
                 is_process=is_process,
                 exit_event=exit_event,
+                logger=logger,
             )
         )
         logger.info(
@@ -132,26 +128,24 @@ def main(
 
     with ProcessPoolExecutor(max_workers=3) as executor:
         for s in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):
-            signal.signal(s, partial(shutdown_handler, exit_event=pexit_event))
+            signal.signal(
+                s, partial(shutdown_handler, exit_event=pexit_event, logger=logger)
+            )
 
         task_submit(
             True,
             executor,
             pexit_event,
             "bot",
-            process_run,
-            partial(
-                bot_run,
-                run_discord=run_discord,
-                run_telegram=run_telegram,
-                run_slack=run_slack,
-            ),
-            pexit_event,
+            bot_run,
+            run_telegram,
+            run_slack,
+            run_discord,
+            logger,
+            logger=logger,
         )
 
-        task_submit(
-            run_web, executor, pexit_event, "web", process_run, web_run, pexit_event
-        )
+        task_submit(run_web, executor, pexit_event, "web", web_run, logger=logger)
 
 
 if __name__ == "__main__":

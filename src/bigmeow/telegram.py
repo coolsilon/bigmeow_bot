@@ -5,12 +5,14 @@ import queue
 import threading
 from contextlib import suppress
 from functools import partial
+from typing import Any
 
 import structlog
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import (
+    Application,
     ApplicationBuilder,
     CommandHandler,
     ContextTypes,
@@ -37,7 +39,7 @@ application = ApplicationBuilder().token(os.environ["TELEGRAM_TOKEN"]).build()
 
 
 async def blockedornot_fetch(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
+    update: Update, context: ContextTypes.DEFAULT_TYPE, logger: Any
 ) -> None:
     logger.info("TELEGRAM: Processing isblocked request", update=update)
 
@@ -57,7 +59,9 @@ async def blockedornot_fetch(
         )
 
 
-async def fact_fetch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def fact_fetch(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, logger: Any
+) -> None:
     logger.info("TELEGRAM: Processing fact request", update=update)
 
     if update.message and update.message.text and update.effective_chat:
@@ -72,29 +76,31 @@ async def fact_fetch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             )
 
 
-async def message_filter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def message_filter(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, logger: Any
+) -> None:
     if not (update.message and update.effective_chat):
         return
 
     logger.info("TELEGRAM: Received an update", update=update)
 
     if message_contains(update.message.text, str(MeowCommand.SAY)):
-        asyncio.create_task(say_create(update, context))
+        asyncio.create_task(say_create(update, context, logger))
 
     elif message_contains(update.message.text, str(MeowCommand.THINK)):
-        asyncio.create_task(think_create(update, context))
+        asyncio.create_task(think_create(update, context, logger))
 
     elif message_contains(update.message.text, str(MeowCommand.PROMPT)):
-        asyncio.create_task(prompt_create(update, context))
+        asyncio.create_task(prompt_create(update, context, logger))
 
     elif message_contains(update.message.text, str(MeowCommand.PETROL)):
-        asyncio.create_task(petrol_fetch(update, context))
+        asyncio.create_task(petrol_fetch(update, context, logger))
 
     elif message_contains(update.message.text, str(MeowCommand.FACT)):
-        asyncio.create_task(fact_fetch(update, context))
+        asyncio.create_task(fact_fetch(update, context, logger))
 
     elif message_contains(update.message.text, str(MeowCommand.ISBLOCKED)):
-        asyncio.create_task(blockedornot_fetch(update, context))
+        asyncio.create_task(blockedornot_fetch(update, context, logger))
 
     elif message_contains(update.message.text, "meow", is_command=False):
         logger.info("TELEGRAM: Sending a cat photo", update=update)
@@ -109,9 +115,7 @@ async def message_filter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
 
 
-async def messages_consume() -> None:
-    global application
-
+async def messages_consume(application: Application, logger: Any) -> None:
     with suppress(queue.Empty):
         message = await asyncio.to_thread(
             partial(settings.telegram_messages.get, timeout=settings.QUEUE_TIMEOUT)
@@ -121,7 +125,9 @@ async def messages_consume() -> None:
         asyncio.create_task(application.bot.send_message(**message))
 
 
-async def petrol_fetch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def petrol_fetch(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, logger: Any
+) -> None:
     logger.info("TELEGRAM: Processing petrol request", update=update)
 
     if update.message and update.message.text and update.effective_chat:
@@ -136,10 +142,12 @@ async def petrol_fetch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
 
 
-async def run(exit_event: threading.Event) -> None:
-    global application
-
-    await setup()
+async def run(
+    exit_event: threading.Event,
+    application: Application = application,
+    logger: Any = logger,
+) -> None:
+    await setup(application, logger)
 
     async with application:
         logger.info("TELEGRAM: Starting")
@@ -160,8 +168,12 @@ async def run(exit_event: threading.Event) -> None:
                 )
             )
 
-        asyncio.create_task(coroutine_repeat_queue(updates_consume))
-        asyncio.create_task(coroutine_repeat_queue(messages_consume))
+        asyncio.create_task(
+            coroutine_repeat_queue(partial(updates_consume, application))
+        )
+        asyncio.create_task(
+            coroutine_repeat_queue(partial(messages_consume, application, logger))
+        )
 
         await asyncio.to_thread(exit_event.wait)
 
@@ -169,20 +181,26 @@ async def run(exit_event: threading.Event) -> None:
         await application.stop()
 
 
-async def setup() -> None:
-    global application
-
+async def setup(application: Application, logger: Any) -> None:
     logger.info("TELEGRAM: Initializing application")
 
     application.add_handlers(
         [
-            CommandHandler(MeowCommand.PETROL.value, petrol_fetch),
-            CommandHandler(MeowCommand.SAY.value, say_create),
-            CommandHandler(MeowCommand.THINK.value, think_create),
-            CommandHandler(MeowCommand.PROMPT.value, prompt_create),
-            CommandHandler(MeowCommand.FACT.value, fact_fetch),
-            CommandHandler(MeowCommand.ISBLOCKED.value, blockedornot_fetch),
-            MessageHandler(filters.TEXT, message_filter),
+            CommandHandler(
+                MeowCommand.PETROL.value, partial(petrol_fetch, logger=logger)
+            ),
+            CommandHandler(MeowCommand.SAY.value, partial(say_create, logger=logger)),
+            CommandHandler(
+                MeowCommand.THINK.value, partial(think_create, logger=logger)
+            ),
+            CommandHandler(
+                MeowCommand.PROMPT.value, partial(prompt_create, logger=logger)
+            ),
+            CommandHandler(MeowCommand.FACT.value, partial(fact_fetch, logger=logger)),
+            CommandHandler(
+                MeowCommand.ISBLOCKED.value, partial(blockedornot_fetch, logger=logger)
+            ),
+            MessageHandler(filters.TEXT, partial(message_filter, logger=logger)),
         ]
     )
 
@@ -195,7 +213,9 @@ async def setup() -> None:
     )
 
 
-async def prompt_create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def prompt_create(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, logger: Any
+) -> None:
     logger.info("TELEGRAM: Dispatching prompt request", update=update)
 
     if update.message and update.message.text and update.effective_chat:
@@ -208,7 +228,9 @@ async def prompt_create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
 
 
-async def say_create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def say_create(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, logger: Any
+) -> None:
     logger.info("TELEGRAM: Processing say request", update=update)
 
     if update.message and update.message.text and update.effective_chat:
@@ -227,7 +249,9 @@ async def say_create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
 
 
-async def think_create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def think_create(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, logger: Any
+) -> None:
     logger.info("TELEGRAM: Processing think request", update=update)
 
     if update.message and update.message.text and update.effective_chat:
@@ -247,7 +271,7 @@ async def think_create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
 
 
-async def updates_consume() -> None:
+async def updates_consume(application: Application) -> None:
     with suppress(queue.Empty):
         asyncio.create_task(
             application.update_queue.put(

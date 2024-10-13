@@ -67,7 +67,7 @@ def check_login_is_valid(authorization: str | None) -> bool:
     return result
 
 
-async def run(exit_event: threading.Event) -> None:
+async def run(exit_event: threading.Event, logger: Any = logger) -> None:
     is_debug = check_is_debug()
 
     server = uvicorn.Server(
@@ -221,6 +221,7 @@ async def slack_webhook(
     request: Request,
     x_slack_signature: Annotated[str, Header()],
     x_slack_request_timestamp: Annotated[int, Header()],
+    logger: Any = Header(logger, include_in_schema=False),
 ) -> Any:
     assert SignatureVerifier(signing_secret=os.environ["SLACK_SECRET_SIGN"]).is_valid(
         body=(await request.body()).decode(),
@@ -244,7 +245,9 @@ async def slack_webhook(
 
 @app.post("/telegram", include_in_schema=False)
 async def telegram_webhook(
-    request: Request, x_telegram_bot_api_secret_token: Annotated[str, Header()]
+    request: Request,
+    x_telegram_bot_api_secret_token: Annotated[str, Header()],
+    logger: Any = Header(logger, include_in_schema=False),
 ) -> None:
     if not settings.WEB_TELEGRAM_TOKEN == x_telegram_bot_api_secret_token:
         return
@@ -262,6 +265,7 @@ async def chat_post(
     request: Request,
     x_channel: Annotated[str, Header()],
     x_destination: Annotated[str, Header()],
+    logger: Any = Header(logger, include_in_schema=False),
 ) -> None:
     text = (await request.body()).decode()
 

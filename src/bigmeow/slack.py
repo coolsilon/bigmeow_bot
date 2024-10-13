@@ -4,6 +4,7 @@ import queue
 import threading
 from contextlib import suppress
 from functools import partial
+from typing import Any
 
 from dotenv import load_dotenv
 from slack_sdk.oauth.installation_store import FileInstallationStore
@@ -37,27 +38,28 @@ async def get_client(
     return AsyncWebClient(token=bot.bot_token)
 
 
-async def run(exit_event: threading.Event) -> None:
+async def run(exit_event: threading.Event, logger: Any = logger) -> None:
     logger.info("SLACK: Starting")
 
     store_installation = FileInstallationStore(base_dir=str(settings.data_path_slack))
 
     asyncio.create_task(
-        coroutine_repeat_queue(partial(updates_consume, store_installation))
+        coroutine_repeat_queue(partial(updates_consume, store_installation, logger))
     )
     asyncio.create_task(
-        coroutine_repeat_queue(partial(message_consume, store_installation))
+        coroutine_repeat_queue(partial(message_consume, store_installation, logger))
     )
 
     await asyncio.to_thread(exit_event.wait)
 
 
-async def updates_consume(store: FileInstallationStore) -> None:
+async def updates_consume(store: FileInstallationStore, logger: Any) -> None:
     with suppress(queue.Empty):
         update = await asyncio.to_thread(
             partial(settings.slack_updates.get, timeout=settings.QUEUE_TIMEOUT)
         )
 
+        logger.info("SLACK: Processing message update")
         client = await get_client(store, update["team_id"])
 
         if not update["event"].get("text") or not client:
@@ -149,7 +151,7 @@ async def updates_consume(store: FileInstallationStore) -> None:
             pass
 
 
-async def message_consume(store: FileInstallationStore) -> None:
+async def message_consume(store: FileInstallationStore, logger: Any) -> None:
     with suppress(queue.Empty):
         message = await asyncio.to_thread(
             partial(settings.slack_messages.get, timeout=settings.QUEUE_TIMEOUT)

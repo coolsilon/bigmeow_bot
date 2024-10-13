@@ -6,6 +6,7 @@ import threading
 from contextlib import suppress
 from functools import partial
 from io import StringIO
+from typing import Any
 
 import discord
 import structlog
@@ -38,9 +39,9 @@ def client_init() -> discord.Client:
 client = client_init()
 
 
-async def run(exit_event: threading.Event) -> None:
-    global client
-
+async def run(
+    exit_event: threading.Event, client: discord.Client = client, logger: Any = logger
+) -> None:
     logger.info("DISCORD: Starting")
     async with client:
         asyncio.create_task(client.start(os.environ["DISCORD_TOKEN"]))
@@ -51,9 +52,7 @@ async def run(exit_event: threading.Event) -> None:
         await client.close()
 
 
-async def messages_consume() -> None:
-    global client
-
+async def messages_consume(client: discord.Client, logger: Any) -> None:
     with suppress(queue.Empty):
         data = await asyncio.to_thread(
             partial(settings.discord_messages.get, timeout=settings.QUEUE_TIMEOUT)
@@ -77,7 +76,9 @@ async def messages_consume() -> None:
 
 
 @client.event
-async def on_message(message: discord.Message) -> None:
+async def on_message(
+    message: discord.Message, client: discord.Client = client, logger: Any = logger
+) -> None:
     if message.author == client.user:
         return
 
@@ -143,9 +144,7 @@ async def on_message(message: discord.Message) -> None:
 
 
 @client.event
-async def on_ready() -> None:
-    global client
-
+async def on_ready(client: discord.Client = client, logger: Any = logger) -> None:
     logger.info("DISCORD: Ready for requests")
 
     if not check_is_debug():
@@ -159,7 +158,9 @@ async def on_ready() -> None:
                 user.send(f"Bot {client.user.mention} is up\n{meow_say('Hello~')}")
             )
 
-    asyncio.create_task(coroutine_repeat_queue(messages_consume))
+    asyncio.create_task(
+        coroutine_repeat_queue(partial(messages_consume, client, logger))
+    )
 
 
 async def text_send(content: str, reference: discord.Message) -> None:
