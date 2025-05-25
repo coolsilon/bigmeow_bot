@@ -2,18 +2,21 @@ import asyncio
 import json
 import os
 import queue
-import threading
 from contextlib import suppress
-from functools import partial
 from io import StringIO
-from typing import Any
+from multiprocessing.synchronize import Event as Event
 
 import discord
-import structlog
 from dotenv import load_dotenv
+from structlog.stdlib import BoundLogger
 
 import bigmeow.settings as settings
-from bigmeow.common import check_is_debug, coroutine_repeat_queue, message_contains
+from bigmeow.common import (
+    check_is_debug,
+    coroutine_repeat_queue,
+    get_logger,
+    message_contains,
+)
 from bigmeow.meow import (
     meow_blockedornot,
     meow_fact,
@@ -25,7 +28,6 @@ from bigmeow.meow import (
 from bigmeow.settings import MeowCommand
 
 load_dotenv()
-logger = structlog.get_logger()
 
 
 def client_init() -> discord.Client:
@@ -40,7 +42,9 @@ client = client_init()
 
 
 async def run(
-    exit_event: threading.Event, client: discord.Client = client, logger: Any = logger
+    exit_event: Event,
+    client: discord.Client = client,
+    logger: BoundLogger = get_logger(__name__),
 ) -> None:
     logger.info("DISCORD: Starting")
     async with client:
@@ -52,10 +56,10 @@ async def run(
         await client.close()
 
 
-async def messages_consume(client: discord.Client, logger: Any) -> None:
+async def messages_consume(client: discord.Client, logger: BoundLogger) -> None:
     with suppress(queue.Empty):
         data = await asyncio.to_thread(
-            partial(settings.discord_messages.get, timeout=settings.QUEUE_TIMEOUT)
+            settings.discord_messages.get, timeout=settings.QUEUE_TIMEOUT
         )
 
         logger.info("DISCORD: Processing messages from queue", data=data)
@@ -64,7 +68,7 @@ async def messages_consume(client: discord.Client, logger: Any) -> None:
             channel = await client.fetch_channel(data["channel_id"])
         except Exception as e:
             logger.error("DISCORD: Invalid channel", data=data)
-            logger.exception(e)
+            logger.exception(e)  # type: ignore
 
         try:
             message = await channel.fetch_message(data["message_id"])  # type: ignore
@@ -77,7 +81,9 @@ async def messages_consume(client: discord.Client, logger: Any) -> None:
 
 @client.event
 async def on_message(
-    message: discord.Message, client: discord.Client = client, logger: Any = logger
+    message: discord.Message,
+    client: discord.Client = client,
+    logger: BoundLogger = get_logger(__name__),
 ) -> None:
     if message.author == client.user:
         return
@@ -144,7 +150,9 @@ async def on_message(
 
 
 @client.event
-async def on_ready(client: discord.Client = client, logger: Any = logger) -> None:
+async def on_ready(
+    client: discord.Client = client, logger: BoundLogger = get_logger(__name__)
+) -> None:
     logger.info("DISCORD: Ready for requests")
 
     if not check_is_debug():
@@ -158,9 +166,7 @@ async def on_ready(client: discord.Client = client, logger: Any = logger) -> Non
                 user.send(f"Bot {client.user.mention} is up\n{meow_say('Hello~')}")
             )
 
-    asyncio.create_task(
-        coroutine_repeat_queue(partial(messages_consume, client, logger))
-    )
+    asyncio.create_task(coroutine_repeat_queue(messages_consume, client, logger))
 
 
 async def text_send(content: str, reference: discord.Message) -> None:

@@ -2,12 +2,11 @@ import asyncio
 import json
 import os
 import queue
-import threading
 from contextlib import suppress
 from functools import partial
+from multiprocessing.synchronize import Event
 from typing import Any
 
-import structlog
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.constants import ParseMode
@@ -21,7 +20,12 @@ from telegram.ext import (
 )
 
 import bigmeow.settings as settings
-from bigmeow.common import check_is_debug, coroutine_repeat_queue, message_contains
+from bigmeow.common import (
+    check_is_debug,
+    coroutine_repeat_queue,
+    get_logger,
+    message_contains,
+)
 from bigmeow.meow import (
     meow_blockedornot,
     meow_fact,
@@ -34,7 +38,6 @@ from bigmeow.settings import MeowCommand
 
 load_dotenv()
 
-logger = structlog.get_logger()
 application = ApplicationBuilder().token(os.environ["TELEGRAM_TOKEN"]).build()
 
 
@@ -118,7 +121,8 @@ async def message_filter(
 async def messages_consume(application: Application, logger: Any) -> None:
     with suppress(queue.Empty):
         message = await asyncio.to_thread(
-            partial(settings.telegram_messages.get, timeout=settings.QUEUE_TIMEOUT)
+            settings.telegram_messages.get,
+            timeout=settings.QUEUE_TIMEOUT,
         )
 
         logger.info("TELEGRAM: Processing prompt reply")
@@ -143,9 +147,9 @@ async def petrol_fetch(
 
 
 async def run(
-    exit_event: threading.Event,
+    exit_event: Event,
     application: Application = application,
-    logger: Any = logger,
+    logger: Any = get_logger(__name__),
 ) -> None:
     await setup(application, logger)
 
@@ -168,11 +172,9 @@ async def run(
                 )
             )
 
+        asyncio.create_task(coroutine_repeat_queue(updates_consume, application))
         asyncio.create_task(
-            coroutine_repeat_queue(partial(updates_consume, application))
-        )
-        asyncio.create_task(
-            coroutine_repeat_queue(partial(messages_consume, application, logger))
+            coroutine_repeat_queue(messages_consume, application, logger)
         )
 
         await asyncio.to_thread(exit_event.wait)
@@ -277,10 +279,8 @@ async def updates_consume(application: Application) -> None:
             application.update_queue.put(
                 Update.de_json(
                     await asyncio.to_thread(
-                        partial(
-                            settings.telegram_updates.get,
-                            timeout=settings.QUEUE_TIMEOUT,
-                        )
+                        settings.telegram_updates.get,
+                        timeout=settings.QUEUE_TIMEOUT,
                     ),
                     application.bot,
                 )

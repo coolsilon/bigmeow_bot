@@ -12,7 +12,7 @@ from cowsay import cowsay, cowthink
 from dotenv import load_dotenv
 
 from bigmeow import settings
-from bigmeow.settings import Change, Latest, Level
+from bigmeow.settings import Latest, PetrolChange, PetrolLevel
 
 load_dotenv()
 logger = structlog.get_logger()
@@ -47,10 +47,12 @@ async def meow_blockedornot(query: str, logger: Any = logger) -> str:
         return "\n".join(result + ["Powered by https://blockedornot.sinarproject.org/"])
 
 
-def meowpetrol_update_latest(current: Latest, incoming: Level | Change) -> Latest:
+def meowpetrol_update_latest(
+    current: Latest, incoming: PetrolLevel | PetrolChange
+) -> Latest:
     field = None
 
-    if isinstance(incoming, Level):
+    if isinstance(incoming, PetrolLevel):
         if incoming.date > current.level.date:
             field = "level"
     else:
@@ -89,14 +91,14 @@ async def meow_petrol(logger: Any = logger) -> str:
                 settings.latest_cache = reduce(
                     meowpetrol_update_latest,
                     [
-                        Level(
+                        PetrolLevel(
                             date.fromisoformat(row["date"]),
                             float(row["ron95"]),
                             float(row["ron97"]),
                             float(row["diesel"]),
                         )
                         if row["series_type"] == "level"
-                        else Change(
+                        else PetrolChange(
                             date.fromisoformat(row["date"]),
                             float(row["ron95"]),
                             float(row["ron97"]),

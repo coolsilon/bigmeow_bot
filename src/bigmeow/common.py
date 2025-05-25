@@ -1,7 +1,8 @@
 from collections.abc import Callable
 from os import environ
-from typing import Awaitable
+from typing import Any, Awaitable
 
+import structlog
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -16,6 +17,12 @@ def message_contains(message: str | None, content: str, is_command=True) -> bool
 
     return (message.startswith(content)) if is_command else (content in message.lower())
 
-async def coroutine_repeat_queue(coro_func: Callable[[], Awaitable[None]]) -> None:
+async def coroutine_repeat_queue(
+    coro_func: Callable[..., Awaitable[None]], *args: Any
+) -> None:
     while True:
-        await coro_func()
+        await coro_func(*args)
+
+
+def get_logger(module_name: str) -> structlog.stdlib.BoundLogger:
+    return structlog.get_logger().bind(module=module_name)
