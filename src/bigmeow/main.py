@@ -10,11 +10,8 @@ from typing import Annotated, Any
 import typer
 from structlog.stdlib import BoundLogger
 
-from bigmeow import settings
+from bigmeow import discord, scheduler, settings, telegram, web
 from bigmeow.common import get_logger
-from bigmeow.discord import run as discord_run
-from bigmeow.telegram import run as telegram_run
-from bigmeow.web import run as web_run
 
 
 @dataclass
@@ -73,7 +70,6 @@ def task_submit(
 
 
 def main(
-    run_web: Annotated[bool, typer.Option(" /--noweb")] = True,
     run_discord: Annotated[bool, typer.Option(" /--nodiscord")] = True,
     run_telegram: Annotated[bool, typer.Option(" /--notg")] = True,
 ) -> None:
@@ -91,7 +87,7 @@ def main(
             executor,
             exit_event,
             "bot.telegram",
-            telegram_run,
+            telegram.run,
             shutdown_handler,
             logger,
         )
@@ -101,17 +97,27 @@ def main(
             executor,
             exit_event,
             "bot.discord",
-            discord_run,
+            discord.run,
             shutdown_handler,
             logger,
         )
 
         task_submit(
-            run_web,
+            True,
+            executor,
+            exit_event,
+            "scheduler",
+            scheduler.run,
+            shutdown_handler,
+            logger,
+        )
+
+        task_submit(
+            True,
             executor,
             exit_event,
             "web",
-            web_run,
+            web.run,
             shutdown_handler,
             logger,
         )

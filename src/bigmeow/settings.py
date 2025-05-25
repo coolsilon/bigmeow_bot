@@ -2,13 +2,14 @@ import asyncio
 import contextlib
 import multiprocessing
 import threading
+from ast import literal_eval
 from datetime import date
 from enum import Enum
 from io import BytesIO
 from os import environ
-from pathlib import Path
 from random import choice, randint, shuffle
 
+import pytz
 import structlog
 from attr import dataclass
 from dotenv import load_dotenv
@@ -103,6 +104,8 @@ class MeowCommand(Enum):
     ISBLOCKED = "meowisblocked"
     THINK = "meowthink"
     PROMPT = "meowprompt"
+    HELP = "meowhelp"
+    REMIND = "meowremind"
 
     def telegram(self) -> str:
         COMMAND_PREFIX = "/"
@@ -128,26 +131,45 @@ latest_cache = Latest(
 )
 latest_lock = Lock(manager.Lock())
 
-QUEUE_TIMEOUT = int(environ.get("QUEUE_TIMEOUT", 5))
+try:
+    DEBUG = literal_eval(environ.get("DEBUG", "False"))
+except Exception:
+    DEBUG = False
 
+QUEUE_TIMEOUT = int(environ.get("QUEUE_TIMEOUT", 5))
 
 WEBHOOK_URL = environ.get("WEBHOOK_URL", "http://localhost:8000/webhook")
 WEBHOOK_PORT = int(environ.get("WEBHOOK_PORT") or "8080")
 
+WEB_SECRET_PING = environ["WEB_SECRET_PING"]
+WEB_SECRET_PASSWORD = environ["WEB_SECRET_PASSWORD"]
+WEB_SECRET_PING_USER = "BigMeow"
+
 CACHE_LIMIT = 5
 DATE_FORMAT = "%d/%m/%Y"
-WEB_TELEGRAM_TOKEN = environ["WEB_TELEGRAM_TOKEN"]
 
 TELEGRAM_WEBHOOK = "/webhook/telegram"
+TELEGRAM_USER = environ["TELEGRAM_USER"]
+TELEGRAM_TOKEN = environ["TELEGRAM_TOKEN"]
+TELEGRAM_WEB_TOKEN = environ["WEB_TELEGRAM_TOKEN"]
 telegram_messages = manager.Queue()
 telegram_updates = manager.Queue()
 
-DISCORD_WEBHOOK = "/webhook/discord"
+DISCORD_TOKEN = environ["DISCORD_TOKEN"]
+DISCORD_USER = int(environ["DISCORD_USER"])
 discord_messages = manager.Queue()
 
 ECHO_WEBHOOK = "/webhook/echo"
 
 task_queue = manager.Queue()
+TASK_DEFAULT_STORE = "default"
+TASK_DEFAULT_EXECUTOR = "default"
 
-data_path = Path(environ.get("DATA_PATH", "/data"))
-data_path_slack = data_path / "slack"
+TIMEZONE = pytz.utc
+
+DATABASE_URL = environ.get(
+    "DATABASE_URL",
+    "postgresql+psycopg://dbadmin:abc123@localhost:5432/basku",
+)
+
+IFTTT_KEY = environ.get("IFTTT_KEY")

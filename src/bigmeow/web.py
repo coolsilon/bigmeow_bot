@@ -1,29 +1,20 @@
 import asyncio
 import json
-import os
 from multiprocessing.synchronize import Event
 from typing import Annotated
 
 import aiohttp
 import uvicorn
-from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, Request
 from fastapi.responses import PlainTextResponse
 from structlog.stdlib import BoundLogger
 from telegram.constants import ParseMode
 
 import bigmeow.settings as settings
-from bigmeow.common import check_is_debug, get_logger
+from bigmeow.common import get_logger
 from bigmeow.meow import meow_say
 
-load_dotenv()
-
-
 app = FastAPI()
-
-WEB_SECRET_PING = os.environ["WEB_SECRET_PING"]
-WEB_SECRET_PASSWORD = os.environ["WEB_SECRET_PASSWORD"]
-WEB_SECRET_PING_USER = "BigMeow"
 
 
 class Logger:
@@ -32,16 +23,16 @@ class Logger:
 
 
 async def check_is_reachable() -> bool:
-    global WEB_SECRET_PING_USER, WEB_SECRET_PASSWORD
-
     result = False
 
-    ping_url = f"{os.environ['WEBHOOK_URL']}/{WEB_SECRET_PING}"
+    ping_url = f"{settings.WEBHOOK_URL}/{settings.WEB_SECRET_PING}"
 
     async with aiohttp.request(
         "GET",
         ping_url,
-        auth=aiohttp.BasicAuth(WEB_SECRET_PING_USER, WEB_SECRET_PASSWORD),
+        auth=aiohttp.BasicAuth(
+            settings.WEB_SECRET_PING_USER, settings.WEB_SECRET_PASSWORD
+        ),
     ) as response:
         if response.status == 200 and (await response.text()).strip() == "pong":
             result = True
@@ -50,30 +41,26 @@ async def check_is_reachable() -> bool:
 
 
 def check_login_is_valid(authorization: str | None) -> bool:
-    global WEB_SECRET_PING_USER, WEB_SECRET_PASSWORD
-
     result = False
 
     if authorization:
         auth = aiohttp.BasicAuth.decode(authorization)
-        result = auth.login == WEB_SECRET_PING_USER and (
-            auth.password == WEB_SECRET_PASSWORD
+        result = auth.login == settings.WEB_SECRET_PING_USER and (
+            auth.password == settings.WEB_SECRET_PASSWORD
         )
 
     return result
 
 
 async def run(exit_event: Event, logger: BoundLogger = get_logger(__name__)) -> None:
-    is_debug = check_is_debug()
-
     server = uvicorn.Server(
         uvicorn.Config(
             "bigmeow.web:app",
             host="0.0.0.0",
-            port=int(os.environ.get("WEBHOOK_PORT", "8080")),
+            port=settings.WEBHOOK_PORT,
             log_level="info",
-            workers=None if is_debug else 4,
-            reload=is_debug,
+            workers=None if settings.DEBUG else 4,
+            reload=settings.DEBUG,
         )
     )
 
@@ -103,7 +90,9 @@ async def index_get() -> str:
 
 
 @app.get(
-    f"/{WEB_SECRET_PING}", response_class=PlainTextResponse, include_in_schema=False
+    f"/{settings.WEB_SECRET_PING}",
+    response_class=PlainTextResponse,
+    include_in_schema=False,
 )
 async def pong_get(authorization: Annotated[str, Header()]) -> str:
     assert check_login_is_valid(authorization)  # auth check
@@ -111,13 +100,13 @@ async def pong_get(authorization: Annotated[str, Header()]) -> str:
     return "pong"
 
 
-@app.post("/telegram", include_in_schema=False)
+@app.post(settings.TELEGRAM_WEBHOOK, include_in_schema=False)
 async def telegram_webhook(
     request: Request,
     x_telegram_bot_api_secret_token: Annotated[str, Header()],
     logger: BoundLogger = Depends(Logger()),
 ) -> None:
-    if not settings.WEB_TELEGRAM_TOKEN == x_telegram_bot_api_secret_token:
+    if not settings.TELEGRAM_WEB_TOKEN == x_telegram_bot_api_secret_token:
         return
 
     logger.info("WEBHOOK: Webhook receives a telegram request")
@@ -129,7 +118,7 @@ async def telegram_webhook(
     )
 
 
-@app.post("/chat", include_in_schema=False)
+@app.post(settings.ECHO_WEBHOOK, include_in_schema=False)
 async def chat_post(
     request: Request,
     x_channel: Annotated[str, Header()],
