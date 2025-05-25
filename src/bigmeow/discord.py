@@ -1,14 +1,19 @@
 import asyncio
 import json
 import os
+import queue
+import threading
+from contextlib import suppress
+from functools import partial
 from io import StringIO
+from typing import Any
 
 import discord
 import structlog
 from dotenv import load_dotenv
 
 import bigmeow.settings as settings
-from bigmeow.common import check_is_debug, message_contains
+from bigmeow.common import check_is_debug, coroutine_repeat_queue, message_contains
 from bigmeow.meow import (
     meow_blockedornot,
     meow_fact,
@@ -34,23 +39,25 @@ def client_init() -> discord.Client:
 client = client_init()
 
 
-async def run(exit_event: asyncio.Event | settings.Event) -> None:
-    global client
-
+async def run(
+    exit_event: threading.Event, client: discord.Client = client, logger: Any = logger
+) -> None:
     logger.info("DISCORD: Starting")
     async with client:
         asyncio.create_task(client.start(os.environ["DISCORD_TOKEN"]))
 
-        await exit_event.wait()
+        await asyncio.to_thread(exit_event.wait)
 
         logger.info("DISCORD: Stopping")
         await client.close()
 
 
-async def messages_consume() -> None:
-    global client
+async def messages_consume(client: discord.Client, logger: Any) -> None:
+    with suppress(queue.Empty):
+        data = await asyncio.to_thread(
+            partial(settings.discord_messages.get, timeout=settings.QUEUE_TIMEOUT)
+        )
 
-    while data := await settings.discord_messages.get():
         logger.info("DISCORD: Processing messages from queue", data=data)
 
         try:
@@ -58,7 +65,6 @@ async def messages_consume() -> None:
         except Exception as e:
             logger.error("DISCORD: Invalid channel", data=data)
             logger.exception(e)
-            continue
 
         try:
             message = await channel.fetch_message(data["message_id"])  # type: ignore
@@ -70,7 +76,9 @@ async def messages_consume() -> None:
 
 
 @client.event
-async def on_message(message: discord.Message) -> None:
+async def on_message(
+    message: discord.Message, client: discord.Client = client, logger: Any = logger
+) -> None:
     if message.author == client.user:
         return
 
@@ -88,10 +96,12 @@ async def on_message(message: discord.Message) -> None:
         )
 
     elif message_contains(message.content, str(MeowCommand.PROMPT)):
-        await meow_prompt(
-            message.content.replace(str(MeowCommand.PROMPT), "").strip(),
-            channel="discord",
-            destination=json.dumps((message.channel.id, message.id)),
+        asyncio.create_task(
+            meow_prompt(
+                message.content.replace(str(MeowCommand.PROMPT), "").strip(),
+                channel="discord",
+                destination=json.dumps((message.channel.id, message.id)),
+            )
         )
 
     elif message_contains(message.content, str(MeowCommand.THINK)):
@@ -134,9 +144,7 @@ async def on_message(message: discord.Message) -> None:
 
 
 @client.event
-async def on_ready() -> None:
-    global client
-
+async def on_ready(client: discord.Client = client, logger: Any = logger) -> None:
     logger.info("DISCORD: Ready for requests")
 
     if not check_is_debug():
@@ -150,7 +158,9 @@ async def on_ready() -> None:
                 user.send(f"Bot {client.user.mention} is up\n{meow_say('Hello~')}")
             )
 
-    asyncio.create_task(messages_consume())
+    asyncio.create_task(
+        coroutine_repeat_queue(partial(messages_consume, client, logger))
+    )
 
 
 async def text_send(content: str, reference: discord.Message) -> None:

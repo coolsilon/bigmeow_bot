@@ -4,7 +4,7 @@ from functools import reduce
 from io import BytesIO, StringIO
 from os import environ
 from random import choice
-from typing import Callable
+from typing import Any, Callable
 
 import aiohttp
 import structlog
@@ -26,7 +26,7 @@ def meow_sayify(func: Callable) -> Callable:
 
 
 @meow_sayify
-async def meow_blockedornot(query: str) -> str:
+async def meow_blockedornot(query: str, logger: Any = logger) -> str:
     url = "https://blockedornot.sinarproject.org/api/"
 
     logger.info("MEOW: Fetching blocked query", url=url, query=query)
@@ -61,7 +61,7 @@ def meowpetrol_update_latest(current: Latest, incoming: Level | Change) -> Lates
 
 
 @meow_sayify
-async def meow_fact() -> str:
+async def meow_fact(logger: Any = logger) -> str:
     url = "https://meowfacts.herokuapp.com/"
 
     logger.info("MEOW: Fetching a cat fact", url=url)
@@ -79,7 +79,7 @@ async def meow_fact() -> str:
 
 
 @meow_sayify
-async def meow_petrol() -> str:
+async def meow_petrol(logger: Any = logger) -> str:
     url = "https://storage.data.gov.my/commodities/fuelprice.csv"
 
     async with settings.latest_lock:
@@ -126,7 +126,7 @@ async def meow_petrol() -> str:
         )
 
 
-async def meow_fetch_photo() -> BytesIO:
+async def meow_fetch_photo(logger: Any = logger) -> BytesIO:
     url = "https://cataas.com/cat/says/meow?type=square"
 
     logger.info("MEOW: Fetching a cat photo", url=url)
@@ -139,7 +139,9 @@ async def meow_fetch_photo() -> BytesIO:
             )
 
 
-async def meow_prompt(message: str, channel: str, destination: str) -> None:
+async def meow_prompt(
+    message: str, channel: str, destination: str, logger: Any = logger
+) -> None:
     url = f"https://maker.ifttt.com/trigger/prompt/with/key/{environ.get('IFTTT_KEY')}"
     data = {"value1": message, "value2": channel, "value3": destination}
 
