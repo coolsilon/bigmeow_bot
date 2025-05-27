@@ -6,7 +6,6 @@ A dumb experimental bot done for no good reason
 
 * On discord: https://discord.com/oauth2/authorize?client_id=990077535066935357
 * On telegram: https://t.me/bigmeow_bot
-* On slack: https://bigmeow.coolsilon.com/slack/install
 
 ## What can BigMeow do?
 
@@ -16,6 +15,7 @@ A dumb experimental bot done for no good reason
 * `!meowfact`: Return a meow fact from https://github.com/wh-iterabb-it/meowfacts
 * `!meowisblocked domain.tld`: Perform a query to https://blockedornot.sinarproject.org/ to check if a domain is blocked in Malaysia
 * `!meowprompt prompt`: a reply to the supplied prompt, powered by https://ifttt.com/
+* `!meowremind text @ when`: Set a reminder for yourself after the time specified
 * If your message has a `meow` in it, a cat photo is fetched from https://cataas.com/ (Currently not supported on slack)
 
 NOTE: all `!` commands can be replaced by `/` in telegram, e.g. `/meowsay hello world`.
@@ -39,6 +39,7 @@ IFTTT_KEY=<IFTTT_TOKEN>
 SLACK_SECRET_SIGN=<SLACK SIGNING SECRET>
 SLACK_SECRET_CLIENT=<SLACK CLIENT SECRET>
 SLACK_CLIENT_ID=<SLACK CLIENT ID>
+DATABASE_URL=postgresql+psycopg://<DATABASE_USER>:<DATABASE_PASSWORD>@<DATABASE_HOST>:<DATABASE_PORT>/<DATABASE_NAME>
 ```
 
 ### Python
