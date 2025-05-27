@@ -1,151 +1,131 @@
 import asyncio
-import multiprocessing
 import signal
 import threading
-from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
-from functools import partial
-from os import makedirs
-from typing import Annotated, Any, Callable
+from collections.abc import Callable
+from concurrent.futures import Future, ProcessPoolExecutor
+from dataclasses import dataclass
+from types import FrameType
+from typing import Annotated, Any
 
-import structlog
 import typer
-import uvloop
-from dotenv import load_dotenv
+from structlog.stdlib import BoundLogger
 
-import bigmeow.settings as settings
-from bigmeow.discord import run as discord_run
-from bigmeow.slack import run as slack_run
-from bigmeow.telegram import run as telegram_run
-from bigmeow.web import run as web_run
-
-load_dotenv()
-
-logger = structlog.get_logger()
-
-def done_handler(
-    future: Future,
-    name: str,
-    exit_event: threading.Event,
-    logger: Any,
-    is_process=False,
-) -> None:
-    logger.info(
-        "MAIN: Task is done, prompting others to quit",
-        name=name,
-        is_process=is_process,
-        future=future,
-    )
-
-    if future.exception() is not None:
-        logger.exception(future.exception())
-
-    shutdown_handler(None, None, exit_event, logger, is_process)
+from bigmeow import discord, scheduler, settings, telegram, web
+from bigmeow.common import get_logger
 
 
-def shutdown_handler(
-    _signum, _frame, exit_event: threading.Event, logger: Any, is_process=False
-) -> None:
-    logger.info("MAIN: Sending exit event to all tasks in pool")
-    exit_event.set()
+@dataclass
+class ShutdownHandler:
+    exit_event: threading.Event
+    logger: BoundLogger
+
+    def __call__(self, signum: int | None, frame: FrameType | None) -> None:
+        self.logger.info("MAIN: Sending exit event to all tasks in pool")
+        self.exit_event.set()
 
 
-async def bot_run(
-    pexit_event: threading.Event,
-    run_telegram: bool,
-    run_slack: bool,
-    run_discord: bool,
-    logger: Any,
-) -> None:
-    exit_event = threading.Event()
+@dataclass
+class DoneHandler:
+    name: str
+    exit_event: threading.Event
+    logger: BoundLogger
+    shutdown_handler: ShutdownHandler
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        task_submit(
-            run_telegram,
-            executor,
-            exit_event,
-            "bot.telegram",
-            telegram_run,
-            logger=logger,
-        )
-        task_submit(
-            run_discord, executor, exit_event, "bot.discord", discord_run, logger=logger
-        )
-        task_submit(
-            run_slack, executor, exit_event, "bot.slack", slack_run, logger=logger
+    def __call__(self, future: Future) -> None:
+        self.logger.info(
+            "MAIN: Task is done, prompting others to quit",
+            name=self.name,
+            future=future,
         )
 
-        await asyncio.to_thread(pexit_event.wait)
+        if future.exception() is not None:
+            self.logger.exception(future.exception())  # type: ignore
 
-        logger.info("MAIN: Received process exit signal, sending exit event to threads")
-        exit_event.set()
+        self.shutdown_handler(None, None)
 
 
-def process_run(func, pexit_event: threading.Event, *arguments) -> None:
-    uvloop.run(func(pexit_event, *arguments))
+def process_run(func, exit_event: threading.Event, *arguments) -> None:
+    asyncio.run(func(exit_event, *arguments))
+
 
 def task_submit(
     run: bool,
-    executor: ProcessPoolExecutor | ThreadPoolExecutor,
+    executor: ProcessPoolExecutor,
     exit_event: threading.Event,
     name: str,
     func: Callable[..., Any],
+    shutdown_handler: ShutdownHandler,
+    logger: BoundLogger,
     *arguments: Any,
-    logger: Any,
 ) -> Future | None:
     if run:
-        is_process, future = (
-            isinstance(executor, ProcessPoolExecutor),
-            executor.submit(process_run, func, exit_event, *arguments),
-        )
+        future = executor.submit(process_run, func, exit_event, *arguments)
 
         future.add_done_callback(
-            partial(
-                done_handler,
-                name=name,
-                is_process=is_process,
-                exit_event=exit_event,
-                logger=logger,
-            )
+            DoneHandler(name, exit_event, logger, shutdown_handler)
         )
-        logger.info(
-            "MAIN: Task is submitted", name=name, is_process=is_process, future=future
-        )
+        logger.info("MAIN: Task is submitted", name=name, future=future)
 
         return future
 
 
 def main(
-    run_web: Annotated[bool, typer.Option(" /--noweb")] = True,
     run_discord: Annotated[bool, typer.Option(" /--nodiscord")] = True,
     run_telegram: Annotated[bool, typer.Option(" /--notg")] = True,
-    run_slack: Annotated[bool, typer.Option(" /--noslack")] = True,
 ) -> None:
-    manager = multiprocessing.Manager()
-    pexit_event = manager.Event()
+    logger = get_logger(__name__)
+    exit_event = settings.manager.Event()
 
-    if run_slack:
-        makedirs(settings.data_path_slack, exist_ok=True)
+    with ProcessPoolExecutor(max_workers=10) as executor:
+        shutdown_handler = ShutdownHandler(exit_event, logger)
 
-    with ProcessPoolExecutor(max_workers=3) as executor:
         for s in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):
-            signal.signal(
-                s, partial(shutdown_handler, exit_event=pexit_event, logger=logger)
-            )
+            signal.signal(s, shutdown_handler)
 
-        task_submit(
+        foo = []
+        bar = task_submit(
+            run_telegram,
+            executor,
+            exit_event,
+            "bot.telegram",
+            telegram.run,
+            shutdown_handler,
+            logger,
+        )
+        foo.append(bar)
+
+        bar = task_submit(
+            run_discord,
+            executor,
+            exit_event,
+            "bot.discord",
+            discord.run,
+            shutdown_handler,
+            logger,
+        )
+        foo.append(bar)
+
+        bar = task_submit(
             True,
             executor,
-            pexit_event,
-            "bot",
-            bot_run,
-            run_telegram,
-            run_slack,
-            run_discord,
+            exit_event,
+            "scheduler",
+            scheduler.run,
+            shutdown_handler,
             logger,
-            logger=logger,
         )
+        foo.append(("s", bar))
 
-        task_submit(run_web, executor, pexit_event, "web", web_run, logger=logger)
+        bar = task_submit(
+            True,
+            executor,
+            exit_event,
+            "web",
+            web.run,
+            shutdown_handler,
+            logger,
+        )
+        foo.append(bar)
 
 
 if __name__ == "__main__":

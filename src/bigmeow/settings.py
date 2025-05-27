@@ -2,18 +2,21 @@ import asyncio
 import contextlib
 import multiprocessing
 import threading
+from abc import ABC
+from ast import literal_eval
 from datetime import date
 from enum import Enum
 from io import BytesIO
 from os import environ
-from pathlib import Path
 from random import choice, randint, shuffle
 from typing import NamedTuple
 
+import pytz
 import structlog
+from attr import dataclass
 from dotenv import load_dotenv
 
-logger = structlog.get_logger()
+logger = structlog.get_logger().bind(module=__name__)
 
 load_dotenv()
 
@@ -41,26 +44,6 @@ class Cat_Cache:
         return choice(self.cat_list)
 
 
-class Lock(contextlib.AbstractAsyncContextManager):
-    def __init__(self, lock: threading.Lock) -> None:
-        self.lock = lock
-
-    async def __aenter__(self) -> None:
-        await self.acquire()
-
-    async def __aexit__(self, exc_type, exc, traceback) -> None:
-        return self.release()
-
-    async def acquire(self) -> bool:
-        return await asyncio.to_thread(self.lock.acquire)
-
-    def release(self) -> None:
-        self.lock.release()
-
-    def locked(self) -> bool:
-        return self.lock.locked()
-
-
 class Fact_Cache:
     fact_list: list[str] = []
 
@@ -83,24 +66,36 @@ class Fact_Cache:
         return choice(self.fact_list)
 
 
-class Row(NamedTuple):
+@dataclass
+class Lock(contextlib.AbstractAsyncContextManager):
+    lock: threading.Lock
+
+    async def __aenter__(self) -> None:
+        await asyncio.to_thread(self.lock.acquire)
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        self.lock.release()
+
+
+@dataclass
+class PetrolRow(ABC):
     date: date
     ron95: float
     ron97: float
     diesel: float
 
 
-class Level(Row):
+class PetrolLevel(PetrolRow):
     pass
 
 
-class Change(Row):
+class PetrolChange(PetrolRow):
     pass
 
 
 class Latest(NamedTuple):
-    level: Level
-    change: Change
+    level: PetrolLevel
+    change: PetrolChange
 
 
 class MeowCommand(Enum):
@@ -110,6 +105,8 @@ class MeowCommand(Enum):
     ISBLOCKED = "meowisblocked"
     THINK = "meowthink"
     PROMPT = "meowprompt"
+    HELP = "meowhelp"
+    REMIND = "meowremind"
 
     def telegram(self) -> str:
         COMMAND_PREFIX = "/"
@@ -122,25 +119,58 @@ class MeowCommand(Enum):
         return f"{COMMAND_PREFIX}{self.value}"
 
 
-cat_cache, cat_lock = Cat_Cache(), Lock(threading.Lock())
-fact_cache, fact_lock = Fact_Cache(), Lock(threading.Lock())
-latest_cache, latest_lock = (
-    Latest(Level(date.min, 0, 0, 0), Change(date.min, 0, 0, 0)),
-    Lock(threading.Lock()),
+manager = multiprocessing.Manager()
+cat_cache = Cat_Cache()
+cat_lock = Lock(manager.Lock())
+
+fact_cache = Fact_Cache()
+fact_lock = Lock(manager.Lock())
+
+latest_cache = Latest(
+    PetrolLevel(date.min, 0, 0, 0),
+    PetrolChange(date.min, 0, 0, 0),
 )
+latest_lock = Lock(manager.Lock())
+
+try:
+    DEBUG = literal_eval(environ.get("DEBUG", "False"))
+except Exception:
+    DEBUG = False
+
+QUEUE_TIMEOUT = int(environ.get("QUEUE_TIMEOUT", 5))
+
+WEBHOOK_URL = environ.get("WEBHOOK_URL", "http://localhost:8000/webhook")
+WEBHOOK_PORT = int(environ.get("WEBHOOK_PORT") or "8080")
+
+WEB_SECRET_PING = environ["WEB_SECRET_PING"]
+WEB_SECRET_PASSWORD = environ["WEB_SECRET_PASSWORD"]
+WEB_SECRET_PING_USER = "BigMeow"
 
 CACHE_LIMIT = 5
 DATE_FORMAT = "%d/%m/%Y"
-WEB_TELEGRAM_TOKEN = environ["WEB_TELEGRAM_TOKEN"]
 
-QUEUE_TIMEOUT = int(environ.get("QUEUE_TIMEOUT", 3))
+TELEGRAM_WEBHOOK = "/webhook/telegram"
+TELEGRAM_USER = environ["TELEGRAM_USER"]
+TELEGRAM_TOKEN = environ["TELEGRAM_TOKEN"]
+TELEGRAM_WEB_TOKEN = environ["WEB_TELEGRAM_TOKEN"]
+telegram_messages = manager.Queue()
+telegram_updates = manager.Queue()
 
-telegram_updates = multiprocessing.Queue()
-slack_updates = multiprocessing.Queue()
+DISCORD_TOKEN = environ["DISCORD_TOKEN"]
+DISCORD_USER = int(environ["DISCORD_USER"])
+discord_messages = manager.Queue()
 
-telegram_messages = multiprocessing.Queue()
-discord_messages = multiprocessing.Queue()
-slack_messages = multiprocessing.Queue()
+ECHO_WEBHOOK = "/webhook/echo"
 
-data_path = Path(environ.get("DATA_PATH", "/data"))
-data_path_slack = data_path / "slack"
+task_queue = manager.Queue()
+TASK_DEFAULT_STORE = "default"
+TASK_DEFAULT_EXECUTOR = "default"
+
+TIMEZONE = pytz.utc
+
+DATABASE_URL = environ.get(
+    "DATABASE_URL",
+    "postgresql+psycopg://dbadmin:abc123@localhost:5432/bigmeow",
+)
+
+IFTTT_KEY = environ.get("IFTTT_KEY")
