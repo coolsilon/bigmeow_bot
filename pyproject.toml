@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "bigmeow"
-version = "0.1.0"
+version = "0.2.0"
 description = ""
 authors = ["Your Name <you@example.com>"]
 
@@ -13,17 +13,19 @@ python-cowsay = "^1.2.0"
 discord-py = "^2.3.2"
 fastapi = {extras = ["standard"], version = "^0.115.12"}
 typer = "^0.12.5"
-psycopg = "^3.2.9"
 httpx = "^0.28.1"
 pytz = "^2025.2"
 sqlalchemy = "^2.0.41"
 apscheduler = "^3.11.0"
+psycopg = {extras = ["binary"], version = "^3.2.9"}
+dateparser = "^1.2.1"
 
 [tool.poetry.group.dev.dependencies]
 black = "^24.4.2"
 prospector = "^1.10.3"
 pytest = "^8.2.1"
 ipdb = "^0.13.13"
+psutil = "^7.0.0"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
