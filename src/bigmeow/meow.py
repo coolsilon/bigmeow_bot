@@ -180,7 +180,7 @@ async def meow_remind(
             "trigger": DateTrigger(when, settings.TIMEZONE),
             "args": (
                 queue.put,
-                callable(meow_say(text)),
+                data_builder(meow_say(text)),
             ),
             "misfire_grace_time": None,
         },
