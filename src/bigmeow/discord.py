@@ -5,10 +5,8 @@ from contextlib import suppress
 from io import StringIO
 from multiprocessing.synchronize import Event as Event
 
-import dateparser
 import discord
 import httpx
-from apscheduler.triggers.date import DateTrigger
 from structlog.stdlib import BoundLogger
 
 import bigmeow.settings as settings
@@ -91,7 +89,9 @@ async def on_message(
 
     async with httpx.AsyncClient() as aclient:
         if message_contains(message.content, str(MeowCommand.PETROL)):
-            asyncio.create_task(text_send(await meow_petrol(), reference=message))
+            asyncio.create_task(
+                text_send(await meow_petrol(aclient), reference=message)
+            )
 
         elif message_contains(message.content, str(MeowCommand.SAY)):
             asyncio.create_task(
@@ -102,13 +102,11 @@ async def on_message(
             )
 
         elif message_contains(message.content, str(MeowCommand.PROMPT)):
-            asyncio.create_task(
-                meow_prompt(
-                    aclient,
-                    message.content.replace(str(MeowCommand.PROMPT), "").strip(),
-                    channel="discord",
-                    destination=json.dumps((message.channel.id, message.id)),
-                )
+            await meow_prompt(
+                aclient,
+                message.content.replace(str(MeowCommand.PROMPT), "").strip(),
+                channel="discord",
+                destination=json.dumps((message.channel.id, message.id)),
             )
 
         elif message_contains(message.content, str(MeowCommand.THINK)):
@@ -123,12 +121,13 @@ async def on_message(
             )
 
         elif message_contains(message.content, str(MeowCommand.FACT)):
-            asyncio.create_task(text_send(await meow_fact(), reference=message))
+            asyncio.create_task(text_send(await meow_fact(aclient), reference=message))
 
         elif message_contains(message.content, str(MeowCommand.ISBLOCKED)):
             asyncio.create_task(
                 text_send(
                     await meow_blockedornot(
+                        aclient,
                         message.content.replace(str(MeowCommand.ISBLOCKED), "").strip(),
                     ),
                     reference=message,
