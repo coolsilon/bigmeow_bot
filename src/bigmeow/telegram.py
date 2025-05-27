@@ -5,8 +5,11 @@ from contextlib import suppress
 from dataclasses import dataclass
 from functools import partial
 from multiprocessing.synchronize import Event
+from typing import Any, Callable
 
+import dateparser
 import httpx
+from apscheduler.triggers.date import DateTrigger
 from httpx import AsyncClient
 from structlog.stdlib import BoundLogger
 from telegram import Message, Update
@@ -32,11 +35,13 @@ from bigmeow.meow import (
     meow_fetch_photo,
     meow_petrol,
     meow_prompt,
+    meow_remind,
     meow_say,
 )
 from bigmeow.settings import MeowCommand
 
 application = ApplicationBuilder().token(settings.TELEGRAM_TOKEN).build()
+
 
 @dataclass
 class Filter(MessageFilter):
@@ -70,6 +75,17 @@ async def blockedornot_fetch(
                     allow_sending_without_reply=True,
                 )
             )
+
+
+def command_handler_pair(
+    command: MeowCommand, handler: Callable[..., Any], logger: BoundLogger
+) -> tuple[CommandHandler, MessageHandler]:
+    return CommandHandler(
+        command.value, partial(handler, logger=logger)
+    ), MessageHandler(
+        Filter(str(command), True),
+        partial(handler, logger=logger),
+    )
 
 
 async def fact_fetch(
@@ -116,7 +132,7 @@ async def messages_consume(application: Application, logger: BoundLogger) -> Non
             timeout=settings.QUEUE_TIMEOUT,
         )
 
-        logger.info("TELEGRAM: Processing prompt reply")
+        logger.info("TELEGRAM: Processing message reply")
         asyncio.create_task(application.bot.send_message(**message))
 
 
@@ -156,12 +172,10 @@ async def run(
                 "TELEGRAM: Sending up message to owner",
                 chat_id=settings.TELEGRAM_USER,
             )
-            asyncio.create_task(
-                application.bot.send_message(
-                    chat_id=settings.TELEGRAM_USER,
-                    parse_mode=ParseMode.MARKDOWN,
-                    text=meow_say("Bot is up"),
-                )
+            await application.bot.send_message(
+                chat_id=settings.TELEGRAM_USER,
+                parse_mode=ParseMode.MARKDOWN,
+                text=meow_say("Bot is up"),
             )
 
         asyncio.create_task(coroutine_repeat_queue(updates_consume, application))
@@ -179,47 +193,20 @@ async def setup(application: Application, logger: BoundLogger) -> None:
     logger.info("TELEGRAM: Initializing application")
 
     application.add_handlers(
-        [
-            CommandHandler(
-                MeowCommand.PETROL.value, partial(petrol_fetch, logger=logger)
-            ),
-            MessageHandler(
-                Filter(MeowCommand.PETROL.value, True),
-                partial(petrol_fetch, logger=logger),
-            ),
-            CommandHandler(MeowCommand.SAY.value, partial(say_create, logger=logger)),
-            MessageHandler(
-                Filter(MeowCommand.SAY.value, True), partial(say_create, logger=logger)
-            ),
-            CommandHandler(
-                MeowCommand.THINK.value, partial(think_create, logger=logger)
-            ),
-            MessageHandler(
-                Filter(MeowCommand.THINK.value, True),
-                partial(think_create, logger=logger),
-            ),
-            CommandHandler(
-                MeowCommand.PROMPT.value, partial(prompt_create, logger=logger)
-            ),
-            MessageHandler(
-                Filter(MeowCommand.PROMPT.value, True),
-                partial(prompt_create, logger=logger),
-            ),
-            CommandHandler(MeowCommand.FACT.value, partial(fact_fetch, logger=logger)),
-            MessageHandler(
-                Filter(MeowCommand.FACT.value, True), partial(fact_fetch, logger=logger)
-            ),
-            CommandHandler(
-                MeowCommand.ISBLOCKED.value, partial(blockedornot_fetch, logger=logger)
-            ),
-            MessageHandler(
-                Filter(MeowCommand.ISBLOCKED.value, True),
-                partial(blockedornot_fetch, logger=logger),
-            ),
+        list(
+            command_handler_pair(MeowCommand.PETROL, petrol_fetch, logger)
+            + command_handler_pair(MeowCommand.SAY, say_create, logger)
+            + command_handler_pair(MeowCommand.THINK, think_create, logger)
+            + command_handler_pair(MeowCommand.PROMPT, prompt_create, logger)
+            + command_handler_pair(MeowCommand.FACT, fact_fetch, logger)
+            + command_handler_pair(MeowCommand.ISBLOCKED, blockedornot_fetch, logger)
+            + command_handler_pair(MeowCommand.REMIND, remind_submit, logger)
+        )
+        + [
             MessageHandler(
                 Filter("meow", False),
                 partial(meow_create, logger=logger),
-            ),
+            )
         ]
     )
 
@@ -265,6 +252,48 @@ async def say_create(
                     .strip()
                 ),
                 reply_to_message_id=update.message.id,
+                allow_sending_without_reply=True,
+            )
+        )
+
+
+async def remind_submit(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, logger: BoundLogger
+) -> None:
+    logger.info("TELEGRAM: Processing remind request", update=update)
+
+    try:
+        assert update.message and update.message.text and update.effective_chat
+
+        asyncio.create_task(
+            context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                parse_mode=ParseMode.MARKDOWN,
+                text=await meow_remind(
+                    update.message.text.replace(MeowCommand.REMIND.telegram(), "")
+                    .replace(str(MeowCommand.REMIND), "")
+                    .strip(),
+                    settings.telegram_messages,
+                    lambda content: {
+                        "text": content,
+                        "chat_id": update.effective_chat.id,
+                        "parse_mode": ParseMode.MARKDOWN,
+                        "reply_to_message_id": update.message.id,
+                        "allow_sending_without_reply": True,
+                    },
+                ),
+                reply_to_message_id=update.message.id,
+                allow_sending_without_reply=True,
+            )
+        )
+
+    except (ValueError, AssertionError):
+        asyncio.create_task(
+            context.bot.send_message(
+                chat_id=update.effective_chat.id,  # type: ignore
+                parse_mode=ParseMode.MARKDOWN,
+                text="Fail to schedule message, please check format again",
+                reply_to_message_id=update.message.id,  # type: ignore
                 allow_sending_without_reply=True,
             )
         )

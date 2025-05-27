@@ -82,7 +82,8 @@ def main(
         for s in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):
             signal.signal(s, shutdown_handler)
 
-        task_submit(
+        foo = []
+        bar = task_submit(
             run_telegram,
             executor,
             exit_event,
@@ -91,8 +92,9 @@ def main(
             shutdown_handler,
             logger,
         )
+        foo.append(bar)
 
-        task_submit(
+        bar = task_submit(
             run_discord,
             executor,
             exit_event,
@@ -101,8 +103,9 @@ def main(
             shutdown_handler,
             logger,
         )
+        foo.append(bar)
 
-        task_submit(
+        bar = task_submit(
             True,
             executor,
             exit_event,
@@ -111,8 +114,9 @@ def main(
             shutdown_handler,
             logger,
         )
+        foo.append(("s", bar))
 
-        task_submit(
+        bar = task_submit(
             True,
             executor,
             exit_event,
@@ -121,6 +125,7 @@ def main(
             shutdown_handler,
             logger,
         )
+        foo.append(bar)
 
 
 if __name__ == "__main__":

@@ -1,11 +1,15 @@
+import asyncio
 import csv
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from functools import reduce
 from io import BytesIO, StringIO
+from queue import Queue
 from random import choice
-from typing import Callable
+from typing import Any, Callable
 
+import dateparser
 import httpx
+from apscheduler.triggers.date import DateTrigger
 from cowsay import cowsay, cowthink
 from structlog.stdlib import BoundLogger
 
@@ -159,6 +163,30 @@ async def meow_prompt(
     logger.info("MEOW: Sending IFTTT request", ifttt_event="prompt", data=data)
     response = await client.post(url, json=data)
     logger.info("MEOW: IFTTT response", response=response.text)
+
+
+async def meow_remind(
+    message: str, queue: Queue, data_builder: Callable[[str], dict[str, Any]]
+) -> str:
+    text, when = message.rsplit("@", maxsplit=1)
+    when = dateparser.parse(when, settings={"TIMEZONE": settings.TIMEZONE.zone})  # type: ignore
+
+    assert when
+
+    await asyncio.to_thread(
+        settings.task_queue.put,
+        {
+            "func": "bigmeow.scheduler:execute_sync",
+            "trigger": DateTrigger(when, settings.TIMEZONE),
+            "args": (
+                queue.put,
+                callable(meow_say(text)),
+            ),
+            "misfire_grace_time": None,
+        },
+    )
+
+    return f"Scheduled message: {text}\nTime: {when}"
 
 
 def meow_say(message: str, is_cowthink: bool = False, wrap_text: bool = True) -> str:

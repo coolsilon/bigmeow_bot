@@ -2,12 +2,14 @@ import asyncio
 import contextlib
 import multiprocessing
 import threading
+from abc import ABC
 from ast import literal_eval
 from datetime import date
 from enum import Enum
 from io import BytesIO
 from os import environ
 from random import choice, randint, shuffle
+from typing import NamedTuple
 
 import pytz
 import structlog
@@ -76,7 +78,7 @@ class Lock(contextlib.AbstractAsyncContextManager):
 
 
 @dataclass
-class PetrolRow:
+class PetrolRow(ABC):
     date: date
     ron95: float
     ron97: float
@@ -91,8 +93,7 @@ class PetrolChange(PetrolRow):
     pass
 
 
-@dataclass
-class Latest:
+class Latest(NamedTuple):
     level: PetrolLevel
     change: PetrolChange
 
@@ -169,7 +170,7 @@ TIMEZONE = pytz.utc
 
 DATABASE_URL = environ.get(
     "DATABASE_URL",
-    "postgresql+psycopg://dbadmin:abc123@localhost:5432/basku",
+    "postgresql+psycopg://dbadmin:abc123@localhost:5432/bigmeow",
 )
 
 IFTTT_KEY = environ.get("IFTTT_KEY")

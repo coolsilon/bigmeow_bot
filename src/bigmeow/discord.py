@@ -5,8 +5,10 @@ from contextlib import suppress
 from io import StringIO
 from multiprocessing.synchronize import Event as Event
 
+import dateparser
 import discord
 import httpx
+from apscheduler.triggers.date import DateTrigger
 from structlog.stdlib import BoundLogger
 
 import bigmeow.settings as settings
@@ -21,6 +23,7 @@ from bigmeow.meow import (
     meow_fetch_photo,
     meow_petrol,
     meow_prompt,
+    meow_remind,
     meow_say,
 )
 from bigmeow.settings import MeowCommand
@@ -132,6 +135,9 @@ async def on_message(
                 )
             )
 
+        elif message_contains(message.content, str(MeowCommand.REMIND)):
+            asyncio.create_task(process_remind(message, client, logger))
+
         elif message_contains(message.content, "meow", is_command=False):
             logger.info("DISCORD: Sending a cat photo", message=message)
             asyncio.create_task(
@@ -163,6 +169,36 @@ async def on_ready(
             )
 
     asyncio.create_task(coroutine_repeat_queue(messages_consume, client, logger))
+
+
+async def process_remind(
+    message: discord.Message, client: discord.Client, logger: BoundLogger
+) -> None:
+    logger.info("DISCORD: Processing remind request", message=message)
+
+    try:
+        asyncio.create_task(
+            text_send(
+                await meow_remind(
+                    message.content.replace(str(MeowCommand.REMIND), "").strip(),
+                    settings.discord_messages,
+                    lambda content: {
+                        "content": content,
+                        "channel_id": message.channel.id,
+                        "message_id": message.id,
+                    },
+                ),
+                reference=message,
+            )
+        )
+
+    except (ValueError, AssertionError):
+        asyncio.create_task(
+            text_send(
+                "Fail to schedule message, please check format again",
+                reference=message,
+            )
+        )
 
 
 async def text_send(content: str, reference: discord.Message) -> None:

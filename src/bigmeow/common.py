@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from collections.abc import Callable
 from typing import Any, Awaitable
 
@@ -12,9 +14,15 @@ def message_contains(message: str | None, content: str, is_command=True) -> bool
 async def coroutine_repeat_queue(
     coro_func: Callable[..., Awaitable[None]], *args: Any
 ) -> None:
-    while True:
-        await coro_func(*args)
+    try:
+        while True:
+            await coro_func(*args)
+    except asyncio.CancelledError:
+        pass
 
 
 def get_logger(module_name: str) -> structlog.stdlib.BoundLogger:
+    structlog.configure(
+        wrapper_class=structlog.make_filtering_bound_logger(logging.DEBUG),
+    )
     return structlog.get_logger().bind(module=module_name)
