@@ -11,7 +11,6 @@ from structlog.stdlib import BoundLogger
 from telegram.constants import ParseMode
 
 import bigmeow.settings as settings
-from bigmeow import telegram
 from bigmeow.common import get_logger
 from bigmeow.meow import meow_say
 

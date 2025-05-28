@@ -7,9 +7,7 @@ from functools import partial
 from multiprocessing.synchronize import Event
 from typing import Any, Callable
 
-import dateparser
 import httpx
-from apscheduler.triggers.date import DateTrigger
 from httpx import AsyncClient
 from structlog.stdlib import BoundLogger
 from telegram import Message, Update
@@ -276,9 +274,9 @@ async def remind_submit(
                     settings.telegram_messages,
                     lambda content: {
                         "text": content,
-                        "chat_id": update.effective_chat.id,
+                        "chat_id": update.effective_chat.id,  # type: ignore
                         "parse_mode": ParseMode.MARKDOWN,
-                        "reply_to_message_id": update.message.id,
+                        "reply_to_message_id": update.message.id,  # type: ignore
                         "allow_sending_without_reply": True,
                     },
                 ),

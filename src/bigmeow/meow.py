@@ -1,6 +1,6 @@
 import asyncio
 import csv
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from functools import reduce
 from io import BytesIO, StringIO
 from queue import Queue
@@ -157,6 +157,7 @@ async def meow_prompt(
     destination: str,
     logger: BoundLogger = get_logger(__name__),
 ) -> None:
+    print(client)
     url = f"https://maker.ifttt.com/trigger/prompt/with/key/{settings.IFTTT_KEY}"
     data = {"value1": message, "value2": channel, "value3": destination}
 
