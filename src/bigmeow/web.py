@@ -1,6 +1,6 @@
 import asyncio
 import json
-from multiprocessing.synchronize import Event
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 import aiohttp
@@ -14,7 +14,18 @@ import bigmeow.settings as settings
 from bigmeow.common import get_logger
 from bigmeow.meow import meow_say
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if not hasattr(app.state, "sync_store") and isinstance(
+        app.state, settings.SyncStore
+    ):
+        raise RuntimeError("Runtime sync_store object is missing")
+
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 class Logger:
@@ -52,10 +63,14 @@ def check_login_is_valid(authorization: str | None) -> bool:
     return result
 
 
-async def run(exit_event: Event, logger: BoundLogger = get_logger(__name__)) -> None:
+async def run(
+    sync_store: settings.SyncStore, logger: BoundLogger = get_logger(__name__)
+) -> None:
+    app.state.sync_store = sync_store
+
     server = uvicorn.Server(
         uvicorn.Config(
-            "bigmeow.web:app",
+            app,
             host="0.0.0.0",
             port=settings.WEBHOOK_PORT,
             log_level="info",
@@ -72,7 +87,7 @@ async def run(exit_event: Event, logger: BoundLogger = get_logger(__name__)) -> 
     else:
         raise Exception("Website is unreachable")
 
-    await asyncio.to_thread(exit_event.wait)
+    await asyncio.to_thread(sync_store.exit_event.wait)
 
     logger.info("WEB: Webserver is stopping")
     await server.shutdown()
@@ -112,7 +127,7 @@ async def telegram_webhook(
     logger.info("WEBHOOK: Webhook receives a telegram request")
     asyncio.create_task(
         asyncio.to_thread(
-            settings.telegram_updates.put,
+            request.app.state.sync_store.telegram.updates.put,
             await request.json(),
         )
     )
@@ -139,7 +154,7 @@ async def chat_post(
 
             asyncio.create_task(
                 asyncio.to_thread(
-                    settings.telegram_messages.put,
+                    request.app.state.sync_store.telegram.messages.put,
                     {
                         "text": meow_say(text),
                         "chat_id": chat_id,
@@ -154,7 +169,7 @@ async def chat_post(
             channel_id, message_id = json.loads(x_destination)
             asyncio.create_task(
                 asyncio.to_thread(
-                    settings.discord_messages.put,
+                    request.app.state.sync_store.discord.messages.put,
                     {
                         "content": meow_say(text),
                         "channel_id": channel_id,

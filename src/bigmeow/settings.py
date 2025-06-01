@@ -1,6 +1,5 @@
 import asyncio
 import contextlib
-import multiprocessing
 import threading
 from abc import ABC
 from ast import literal_eval
@@ -8,6 +7,7 @@ from datetime import date
 from enum import Enum
 from io import BytesIO
 from os import environ
+from queue import Queue
 from random import choice, randint, shuffle
 from typing import NamedTuple
 
@@ -22,7 +22,7 @@ load_dotenv()
 
 
 # TODO use proper typing and abstrct to abstract class in py3.12
-class Cat_Cache:
+class CatCache:
     cat_list: list[BytesIO] = []
 
     def cache(self, cat: BytesIO) -> BytesIO:
@@ -44,7 +44,7 @@ class Cat_Cache:
         return choice(self.cat_list)
 
 
-class Fact_Cache:
+class FactCache:
     fact_list: list[str] = []
 
     def cache(self, fact: str) -> str:
@@ -93,7 +93,7 @@ class PetrolChange(PetrolRow):
     pass
 
 
-class Latest(NamedTuple):
+class PetrolPrice(NamedTuple):
     level: PetrolLevel
     change: PetrolChange
 
@@ -119,18 +119,33 @@ class MeowCommand(Enum):
         return f"{COMMAND_PREFIX}{self.value}"
 
 
-manager = multiprocessing.Manager()
-cat_cache = Cat_Cache()
-cat_lock = Lock(manager.Lock())
+@dataclass
+class TelegramSyncStore:
+    messages: Queue
+    updates: Queue
 
-fact_cache = Fact_Cache()
-fact_lock = Lock(manager.Lock())
 
-latest_cache = Latest(
-    PetrolLevel(date.min, 0, 0, 0),
-    PetrolChange(date.min, 0, 0, 0),
-)
-latest_lock = Lock(manager.Lock())
+@dataclass
+class DiscordSyncStore:
+    messages: Queue
+
+
+@dataclass
+class SyncStore:
+    exit_event: threading.Event
+    telegram: TelegramSyncStore
+    discord: DiscordSyncStore
+
+    cats: CatCache
+    cat_lock: Lock
+
+    facts: FactCache
+    fact_lock: Lock
+
+    petrol: PetrolPrice
+    petrol_lock: Lock
+
+    tasks: Queue
 
 try:
     DEBUG = literal_eval(environ.get("DEBUG", "False"))
@@ -153,16 +168,12 @@ TELEGRAM_WEBHOOK = "/webhook/telegram"
 TELEGRAM_USER = environ["TELEGRAM_USER"]
 TELEGRAM_TOKEN = environ["TELEGRAM_TOKEN"]
 TELEGRAM_WEB_TOKEN = environ["WEB_TELEGRAM_TOKEN"]
-telegram_messages = manager.Queue()
-telegram_updates = manager.Queue()
 
 DISCORD_TOKEN = environ["DISCORD_TOKEN"]
 DISCORD_USER = int(environ["DISCORD_USER"])
-discord_messages = manager.Queue()
 
 ECHO_WEBHOOK = "/webhook/echo"
 
-task_queue = manager.Queue()
 TASK_DEFAULT_STORE = "default"
 TASK_DEFAULT_EXECUTOR = "default"
 

@@ -1,8 +1,7 @@
 import asyncio
 from collections.abc import Callable
 from contextlib import suppress
-from queue import Empty
-from threading import Event
+from queue import Empty, Queue
 from typing import Any
 
 from apscheduler.executors.pool import ProcessPoolExecutor
@@ -18,17 +17,19 @@ def execute_sync(callable: Callable[..., Any], *args) -> None:
     callable(*args)
 
 
-async def task_consume(scheduler: AsyncIOScheduler, logger: BoundLogger) -> None:
+async def task_consume(
+    scheduler: AsyncIOScheduler, queue: Queue, logger: BoundLogger
+) -> None:
     with suppress(Empty):
-        task = await asyncio.to_thread(
-            settings.task_queue.get, timeout=settings.QUEUE_TIMEOUT
-        )
+        task = await asyncio.to_thread(queue.get, timeout=settings.QUEUE_TIMEOUT)
 
         logger.info("Retrieved task", **task)
         scheduler.add_job(**task)
 
 
-async def run(exit_event: Event, logger: BoundLogger = get_logger(__name__)) -> None:
+async def run(
+    sync_store: settings.SyncStore, logger: BoundLogger = get_logger(__name__)
+) -> None:
     logger.info("SCHEDULER: Starting")
     scheduler = AsyncIOScheduler(
         timezone=settings.TIMEZONE,
@@ -41,9 +42,11 @@ async def run(exit_event: Event, logger: BoundLogger = get_logger(__name__)) -> 
     scheduler.start()
 
     logger.info("SCHEDULER: Ready for requests")
-    asyncio.create_task(coroutine_repeat_queue(task_consume, scheduler, logger))
+    asyncio.create_task(
+        coroutine_repeat_queue(task_consume, scheduler, sync_store.tasks, logger)
+    )
 
-    await asyncio.to_thread(exit_event.wait)
+    await asyncio.to_thread(sync_store.exit_event.wait)
 
     logger.info("SCHEDULER: Stopping")
 

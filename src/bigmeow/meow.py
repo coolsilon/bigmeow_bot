@@ -15,7 +15,7 @@ from structlog.stdlib import BoundLogger
 
 from bigmeow import settings
 from bigmeow.common import get_logger
-from bigmeow.settings import Latest, PetrolChange, PetrolLevel
+from bigmeow.settings import PetrolChange, PetrolLevel, PetrolPrice
 
 
 def meow_sayify(func: Callable) -> Callable:
@@ -50,8 +50,8 @@ async def meow_blockedornot(
 
 
 def meowpetrol_update_latest(
-    current: Latest, incoming: PetrolLevel | PetrolChange
-) -> Latest:
+    current: PetrolPrice, incoming: PetrolLevel | PetrolChange
+) -> PetrolPrice:
     field = None
 
     if isinstance(incoming, PetrolLevel):
@@ -66,7 +66,10 @@ def meowpetrol_update_latest(
 
 @meow_sayify
 async def meow_fact(
-    client: httpx.AsyncClient, logger: BoundLogger = get_logger(__name__)
+    client: httpx.AsyncClient,
+    facts: settings.FactCache,
+    lock: settings.Lock,
+    logger: BoundLogger = get_logger(__name__),
 ) -> str:
     url = "https://meowfacts.herokuapp.com/"
 
@@ -74,27 +77,30 @@ async def meow_fact(
     response = await client.get(url)
     response_data = response.json()
 
-    async with settings.fact_lock:
+    async with lock:
         return (
-            settings.fact_cache.cache(
+            facts.cache(
                 f"{response_data.get('data')[0]}\n    - https://github.com/wh-iterabb-it/meowfacts"
             )
             if response.status_code == 200
-            else settings.fact_cache.get()
+            else facts.get()
         )
 
 
 @meow_sayify
 async def meow_petrol(
-    client: httpx.AsyncClient, logger: BoundLogger = get_logger(__name__)
+    client: httpx.AsyncClient,
+    petrol: settings.PetrolPrice,
+    lock: settings.Lock,
+    logger: BoundLogger = get_logger(__name__),
 ) -> str:
     url = "https://storage.data.gov.my/commodities/fuelprice.csv"
 
-    async with settings.latest_lock:
-        if (settings.latest_cache.level.date + timedelta(days=6)) < date.today():
+    async with lock:
+        if (petrol.level.date + timedelta(days=6)) < date.today():
             logger.info("MEOW: Fetching the fuel price list", url=url)
             response = await client.get(url)
-            settings.latest_cache = reduce(
+            petrol = reduce(
                 meowpetrol_update_latest,
                 [
                     PetrolLevel(
@@ -112,22 +118,22 @@ async def meow_petrol(
                     )
                     for row in csv.DictReader(StringIO(response.text))
                 ],
-                settings.latest_cache,
+                petrol,
             )
 
         return "\n\n".join(
             (
                 f"Data sourced from {url}",
-                f"From {settings.latest_cache.level.date.strftime(settings.DATE_FORMAT)} to "
-                f"{(settings.latest_cache.level.date + timedelta(days=6)).strftime(settings.DATE_FORMAT)}",
+                f"From {petrol.level.date.strftime(settings.DATE_FORMAT)} to "
+                f"{(petrol.level.date + timedelta(days=6)).strftime(settings.DATE_FORMAT)}",
             )
             + tuple(
                 "Price of {} is RM {} per litre ({} from last week)".format(
                     {"ron95": "RON 95", "ron97": "RON 97", "diesel": "diesel"}.get(
                         field
                     ),
-                    getattr(settings.latest_cache.level, field),
-                    "{:+0.2f}".format(getattr(settings.latest_cache.change, field)),
+                    getattr(petrol.level, field),
+                    "{:+0.2f}".format(getattr(petrol.change, field)),
                 )
                 for field in ("ron95", "ron97", "diesel")
             )
@@ -135,18 +141,21 @@ async def meow_petrol(
 
 
 async def meow_fetch_photo(
-    client: httpx.AsyncClient, logger: BoundLogger = get_logger(__name__)
+    client: httpx.AsyncClient,
+    cats: settings.CatCache,
+    lock: settings.Lock,
+    logger: BoundLogger = get_logger(__name__),
 ) -> BytesIO:
     url = "https://cataas.com/cat/says/meow?type=square"
 
     logger.info("MEOW: Fetching a cat photo", url=url)
     response = await client.get(url)
 
-    async with settings.cat_lock:
+    async with lock:
         return (
-            settings.cat_cache.cache(BytesIO(response.read()))
+            cats.cache(BytesIO(response.read()))
             if response.status_code == 200
-            else settings.cat_cache.get()
+            else cats.get()
         )
 
 
@@ -157,7 +166,6 @@ async def meow_prompt(
     destination: str,
     logger: BoundLogger = get_logger(__name__),
 ) -> None:
-    print(client)
     url = f"https://maker.ifttt.com/trigger/prompt/with/key/{settings.IFTTT_KEY}"
     data = {"value1": message, "value2": channel, "value3": destination}
 
@@ -167,7 +175,10 @@ async def meow_prompt(
 
 
 async def meow_remind(
-    message: str, queue: Queue, data_builder: Callable[[str], dict[str, Any]]
+    message: str,
+    task_queue: Queue,
+    message_queue: Queue,
+    data_builder: Callable[[str], dict[str, Any]],
 ) -> str:
     text, when = message.rsplit("@", maxsplit=1)
     when = dateparser.parse(when, settings={"TIMEZONE": settings.TIMEZONE.zone})  # type: ignore
@@ -175,12 +186,12 @@ async def meow_remind(
     assert when
 
     await asyncio.to_thread(
-        settings.task_queue.put,
+        task_queue.put,
         {
             "func": "bigmeow.scheduler:execute_sync",
             "trigger": DateTrigger(when, settings.TIMEZONE),
             "args": (
-                queue.put,
+                message_queue.put,
                 data_builder(meow_say(text)),
             ),
             "misfire_grace_time": None,
