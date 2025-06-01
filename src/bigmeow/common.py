@@ -1,9 +1,21 @@
 import asyncio
 import logging
+import threading
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 from typing import Any, Awaitable
 
 import structlog
+
+
+@asynccontextmanager
+async def async_lock(lock: threading.Lock):
+    await asyncio.to_thread(lock.acquire)
+
+    try:
+        yield
+    finally:
+        lock.release()
 
 
 def message_contains(message: str | None, content: str, is_command=True) -> bool:

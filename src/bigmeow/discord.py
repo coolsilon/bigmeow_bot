@@ -1,6 +1,7 @@
 import asyncio
 import json
 import queue
+import threading
 from contextlib import suppress
 from functools import partial
 from io import StringIO
@@ -71,23 +72,15 @@ async def run(
         ),
         "on_message",
     )
+    bot.add_command(command_make(petrol_fetch, MeowCommand.PETROL, sync_store, logger))
+    bot.add_command(command_make(say_create, MeowCommand.SAY, sync_store, logger))
+    bot.add_command(command_make(think_create, MeowCommand.THINK, sync_store, logger))
+    bot.add_command(command_make(prompt_create, MeowCommand.PROMPT, sync_store, logger))
     bot.add_command(
-        command_decorator(petrol_fetch, MeowCommand.PETROL, sync_store, logger)
+        command_make(blockedornot_fetch, MeowCommand.ISBLOCKED, sync_store, logger)
     )
-    bot.add_command(command_decorator(say_create, MeowCommand.SAY, sync_store, logger))
-    bot.add_command(
-        command_decorator(think_create, MeowCommand.THINK, sync_store, logger)
-    )
-    bot.add_command(
-        command_decorator(prompt_create, MeowCommand.PROMPT, sync_store, logger)
-    )
-    bot.add_command(
-        command_decorator(blockedornot_fetch, MeowCommand.ISBLOCKED, sync_store, logger)
-    )
-    bot.add_command(command_decorator(fact_fetch, MeowCommand.FACT, sync_store, logger))
-    bot.add_command(
-        command_decorator(remind_submit, MeowCommand.REMIND, sync_store, logger)
-    )
+    bot.add_command(command_make(fact_fetch, MeowCommand.FACT, sync_store, logger))
+    bot.add_command(command_make(remind_submit, MeowCommand.REMIND, sync_store, logger))
 
     async with bot:
         asyncio.create_task(bot.start(settings.DISCORD_TOKEN))
@@ -126,7 +119,7 @@ async def messages_consume(
         asyncio.create_task(text_send(data["content"], channel, message))
 
 
-def command_decorator(
+def command_make(
     func, command: MeowCommand, sync_store: settings.SyncStore, logger: BoundLogger
 ):
     @commands.command(command.value)
@@ -266,7 +259,7 @@ async def on_message(
     message: discord.Message,
     bot: commands.Bot,
     cats: settings.CatCache,
-    lock: settings.Lock,
+    lock: threading.Lock,
     logger: BoundLogger,
 ) -> None:
     if message.author == bot.user:

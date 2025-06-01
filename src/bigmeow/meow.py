@@ -1,5 +1,6 @@
 import asyncio
 import csv
+import threading
 from datetime import date, timedelta
 from functools import reduce
 from io import BytesIO, StringIO
@@ -14,7 +15,7 @@ from cowsay import cowsay, cowthink
 from structlog.stdlib import BoundLogger
 
 from bigmeow import settings
-from bigmeow.common import get_logger
+from bigmeow.common import async_lock, get_logger
 from bigmeow.settings import PetrolChange, PetrolLevel, PetrolPrice
 
 
@@ -68,7 +69,7 @@ def meowpetrol_update_latest(
 async def meow_fact(
     client: httpx.AsyncClient,
     facts: settings.FactCache,
-    lock: settings.Lock,
+    lock: threading.Lock,
     logger: BoundLogger = get_logger(__name__),
 ) -> str:
     url = "https://meowfacts.herokuapp.com/"
@@ -77,7 +78,7 @@ async def meow_fact(
     response = await client.get(url)
     response_data = response.json()
 
-    async with lock:
+    async with async_lock(lock):
         return (
             facts.cache(
                 f"{response_data.get('data')[0]}\n    - https://github.com/wh-iterabb-it/meowfacts"
@@ -91,12 +92,12 @@ async def meow_fact(
 async def meow_petrol(
     client: httpx.AsyncClient,
     petrol: settings.PetrolPrice,
-    lock: settings.Lock,
+    lock: threading.Lock,
     logger: BoundLogger = get_logger(__name__),
 ) -> str:
     url = "https://storage.data.gov.my/commodities/fuelprice.csv"
 
-    async with lock:
+    async with async_lock(lock):
         if (petrol.level.date + timedelta(days=6)) < date.today():
             logger.info("MEOW: Fetching the fuel price list", url=url)
             response = await client.get(url)
@@ -143,7 +144,7 @@ async def meow_petrol(
 async def meow_fetch_photo(
     client: httpx.AsyncClient,
     cats: settings.CatCache,
-    lock: settings.Lock,
+    lock: threading.Lock,
     logger: BoundLogger = get_logger(__name__),
 ) -> BytesIO:
     url = "https://cataas.com/cat/says/meow?type=square"
@@ -151,7 +152,7 @@ async def meow_fetch_photo(
     logger.info("MEOW: Fetching a cat photo", url=url)
     response = await client.get(url)
 
-    async with lock:
+    async with async_lock(lock):
         return (
             cats.cache(BytesIO(response.read()))
             if response.status_code == 200

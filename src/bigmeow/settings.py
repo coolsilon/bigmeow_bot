@@ -1,5 +1,3 @@
-import asyncio
-import contextlib
 import threading
 from abc import ABC
 from ast import literal_eval
@@ -67,17 +65,6 @@ class FactCache:
 
 
 @dataclass
-class Lock(contextlib.AbstractAsyncContextManager):
-    lock: threading.Lock
-
-    async def __aenter__(self) -> None:
-        await asyncio.to_thread(self.lock.acquire)
-
-    async def __aexit__(self, exc_type, exc, traceback) -> None:
-        self.lock.release()
-
-
-@dataclass
 class PetrolRow(ABC):
     date: date
     ron95: float
@@ -137,13 +124,13 @@ class SyncStore:
     discord: DiscordSyncStore
 
     cats: CatCache
-    cat_lock: Lock
+    cat_lock: threading.Lock
 
     facts: FactCache
-    fact_lock: Lock
+    fact_lock: threading.Lock
 
     petrol: PetrolPrice
-    petrol_lock: Lock
+    petrol_lock: threading.Lock
 
     tasks: Queue
 

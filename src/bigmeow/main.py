@@ -79,14 +79,14 @@ def main(
         settings.TelegramSyncStore(manager.Queue(), manager.Queue()),
         settings.DiscordSyncStore(manager.Queue()),
         settings.CatCache(),
-        settings.Lock(manager.Lock()),
+        manager.Lock(),
         settings.FactCache(),
-        settings.Lock(manager.Lock()),
+        manager.Lock(),
         settings.PetrolPrice(
             settings.PetrolLevel(date.min, 0, 0, 0),
             settings.PetrolChange(date.min, 0, 0, 0),
         ),
-        settings.Lock(manager.Lock()),
+        manager.Lock(),
         manager.Queue(),
     )
 
