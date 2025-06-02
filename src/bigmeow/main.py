@@ -1,6 +1,7 @@
 import asyncio
 import multiprocessing
 import signal
+import threading
 from collections.abc import Callable
 from concurrent.futures import Future, ProcessPoolExecutor
 from dataclasses import dataclass
@@ -11,18 +12,18 @@ from typing import Annotated, Any
 import typer
 from structlog.stdlib import BoundLogger
 
-from bigmeow import discord, scheduler, settings, telegram, web
+from bigmeow import common, discord, scheduler, telegram, web
 from bigmeow.common import get_logger
 
 
 @dataclass
 class ShutdownHandler:
-    sync_store: settings.SyncStore
+    exit_event: threading.Event
     logger: BoundLogger
 
     def __call__(self, signum: int | None, frame: FrameType | None) -> None:
         self.logger.info("MAIN: Sending exit event to all tasks in pool")
-        self.sync_store.exit_event.set()
+        self.exit_event.set()
 
 
 @dataclass
@@ -44,14 +45,14 @@ class DoneHandler:
         self.shutdown_handler(None, None)
 
 
-def process_run(func, sync_store: settings.SyncStore, *arguments) -> None:
+def process_run(func, sync_store: common.SyncStore, *arguments) -> None:
     asyncio.run(func(sync_store, *arguments))
 
 
 def task_submit(
     run: bool,
     executor: ProcessPoolExecutor,
-    sync_store: settings.SyncStore,
+    sync_store: common.SyncStore,
     name: str,
     func: Callable[..., Any],
     shutdown_handler: ShutdownHandler,
@@ -74,30 +75,29 @@ def main(
     logger = get_logger(__name__)
 
     manager = multiprocessing.Manager()
-    sync_store = settings.SyncStore(
+    sync_store = common.SyncStore(
         manager.Event(),
-        settings.TelegramSyncStore(manager.Queue(), manager.Queue()),
-        settings.DiscordSyncStore(manager.Queue()),
-        settings.CatCache(),
+        common.TelegramSyncStore(manager.Queue(), manager.Queue()),
+        common.DiscordSyncStore(manager.Queue()),
+        common.CatCache(),
         manager.Lock(),
-        settings.FactCache(),
+        common.FactCache(),
         manager.Lock(),
-        settings.PetrolPrice(
-            settings.PetrolLevel(date.min, 0, 0, 0),
-            settings.PetrolChange(date.min, 0, 0, 0),
+        common.PetrolPrice(
+            common.PetrolLevel(date.min, 0, 0, 0),
+            common.PetrolChange(date.min, 0, 0, 0),
         ),
         manager.Lock(),
         manager.Queue(),
     )
 
     with ProcessPoolExecutor(max_workers=10) as executor:
-        shutdown_handler = ShutdownHandler(sync_store, logger)
+        shutdown_handler = ShutdownHandler(sync_store.exit_event, logger)
 
         for s in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):
             signal.signal(s, shutdown_handler)
 
-        foo = []
-        bar = task_submit(
+        task_submit(
             run_telegram,
             executor,
             sync_store,
@@ -106,9 +106,8 @@ def main(
             shutdown_handler,
             logger,
         )
-        foo.append(bar)
 
-        bar = task_submit(
+        task_submit(
             run_discord,
             executor,
             sync_store,
@@ -117,9 +116,8 @@ def main(
             shutdown_handler,
             logger,
         )
-        foo.append(bar)
 
-        bar = task_submit(
+        task_submit(
             True,
             executor,
             sync_store,
@@ -128,9 +126,8 @@ def main(
             shutdown_handler,
             logger,
         )
-        foo.append(("s", bar))
 
-        bar = task_submit(
+        task_submit(
             True,
             executor,
             sync_store,
@@ -139,7 +136,8 @@ def main(
             shutdown_handler,
             logger,
         )
-        foo.append(bar)
+
+    manager.shutdown()
 
 
 if __name__ == "__main__":

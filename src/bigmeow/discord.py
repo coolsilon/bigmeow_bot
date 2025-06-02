@@ -13,8 +13,9 @@ import httpx
 from discord.ext import commands
 from structlog.stdlib import BoundLogger
 
-import bigmeow.settings as settings
+from bigmeow import common, settings
 from bigmeow.common import (
+    MeowCommand,
     coroutine_repeat_queue,
     get_logger,
     message_contains,
@@ -28,14 +29,11 @@ from bigmeow.meow import (
     meow_remind,
     meow_say,
 )
-from bigmeow.settings import MeowCommand
 
 
 async def on_ready(
     bot: commands.Bot, messages: queue.Queue, logger: BoundLogger
 ) -> None:
-    logger.info("DISCORD: Ready for requests")
-
     if settings.DEBUG:
         user = await bot.fetch_user(settings.DISCORD_USER)
 
@@ -45,19 +43,32 @@ async def on_ready(
                 user.send(f"Bot {bot.user.mention} is up\n{meow_say('Hello~')}")
             )
 
+    logger.info("DISCORD: Ready for requests")
     asyncio.create_task(coroutine_repeat_queue(messages_consume, bot, messages, logger))
 
 
 async def run(
-    sync_store: settings.SyncStore,
+    sync_store: common.SyncStore,
     logger: BoundLogger = get_logger(__name__),
 ) -> None:
-    logger.info("DISCORD: Starting")
-
     bot = commands.Bot(
         "!",
         intents=discord.Intents(messages=True, message_content=True),
     )
+
+    setup(bot, sync_store, logger)
+
+    async with bot:
+        logger.info("DISCORD: Starting")
+        asyncio.create_task(bot.start(settings.DISCORD_TOKEN))
+
+        await asyncio.to_thread(sync_store.exit_event.wait)
+
+        logger.info("DISCORD: Stopping")
+        await bot.close()
+
+
+def setup(bot: commands.Bot, sync_store: common.SyncStore, logger: BoundLogger) -> None:
     bot.add_listener(
         partial(on_ready, bot=bot, messages=sync_store.discord.messages, logger=logger),
         "on_ready",
@@ -72,23 +83,37 @@ async def run(
         ),
         "on_message",
     )
-    bot.add_command(command_make(petrol_fetch, MeowCommand.PETROL, sync_store, logger))
-    bot.add_command(command_make(say_create, MeowCommand.SAY, sync_store, logger))
-    bot.add_command(command_make(think_create, MeowCommand.THINK, sync_store, logger))
-    bot.add_command(command_make(prompt_create, MeowCommand.PROMPT, sync_store, logger))
     bot.add_command(
-        command_make(blockedornot_fetch, MeowCommand.ISBLOCKED, sync_store, logger)
+        command_make(
+            MeowCommand.PETROL,
+            petrol_fetch,
+            logger,
+            petrol=sync_store.petrol,
+            lock=sync_store.petrol_lock,
+        )
     )
-    bot.add_command(command_make(fact_fetch, MeowCommand.FACT, sync_store, logger))
-    bot.add_command(command_make(remind_submit, MeowCommand.REMIND, sync_store, logger))
-
-    async with bot:
-        asyncio.create_task(bot.start(settings.DISCORD_TOKEN))
-
-        await asyncio.to_thread(sync_store.exit_event.wait)
-
-        logger.info("DISCORD: Stopping")
-        await bot.close()
+    bot.add_command(command_make(MeowCommand.SAY, say_create, logger))
+    bot.add_command(command_make(MeowCommand.THINK, think_create, logger))
+    bot.add_command(command_make(MeowCommand.PROMPT, prompt_create, logger))
+    bot.add_command(command_make(MeowCommand.ISBLOCKED, blockedornot_fetch, logger))
+    bot.add_command(
+        command_make(
+            MeowCommand.FACT,
+            fact_fetch,
+            logger,
+            facts=sync_store.facts,
+            lock=sync_store.fact_lock,
+        )
+    )
+    bot.add_command(
+        command_make(
+            MeowCommand.REMIND,
+            remind_submit,
+            logger,
+            tasks=sync_store.tasks,
+            messages=sync_store.discord.messages,
+        )
+    )
 
 
 async def messages_consume(
@@ -119,25 +144,26 @@ async def messages_consume(
         asyncio.create_task(text_send(data["content"], channel, message))
 
 
-def command_make(
-    func, command: MeowCommand, sync_store: settings.SyncStore, logger: BoundLogger
-):
+def command_make(command: MeowCommand, func, logger: BoundLogger, **kwargs: Any):
     @commands.command(command.value)
-    async def inner(*args, **kwargs):
-        return await func(*args, **kwargs, sync_store=sync_store, logger=logger)
+    async def inner(*args_inner, **kwargs_inner):
+        return await func(*args_inner, **kwargs_inner, **kwargs, logger=logger)
 
     return inner
 
 
 async def petrol_fetch(
-    context: commands.Context, sync_store: settings.SyncStore, logger: BoundLogger
+    context: commands.Context,
+    petrol: common.PetrolPrice,
+    lock: threading.Lock,
+    logger: BoundLogger,
 ) -> None:
     logger.info("DISCORD: Received a command", message=context.message)
 
     async with httpx.AsyncClient() as client:
         asyncio.create_task(
             text_send(
-                await meow_petrol(client, sync_store.petrol, sync_store.petrol_lock),
+                await meow_petrol(client, petrol, lock, logger),
                 context.message.channel,
                 context.message,
             )
@@ -146,12 +172,13 @@ async def petrol_fetch(
 async def say_create(
     context: commands.Context,
     *args: str,
-    sync_store: settings.SyncStore,
     logger: BoundLogger,
 ) -> None:
     asyncio.create_task(
         text_send(
-            meow_say(" ".join(args).strip()), context.message.channel, context.message
+            meow_say(" ".join(args).strip()),
+            context.message.channel,
+            context.message,
         )
     )
 
@@ -159,7 +186,6 @@ async def say_create(
 async def prompt_create(
     context: commands.Context,
     *args: str,
-    sync_store: settings.SyncStore,
     logger: BoundLogger,
 ) -> None:
     async with httpx.AsyncClient() as client:
@@ -168,13 +194,13 @@ async def prompt_create(
             " ".join(args).strip(),
             channel="discord",
             destination=json.dumps((context.message.channel.id, context.message.id)),
+            logger=logger,
         )
 
 
 async def think_create(
     context: commands.Context,
     *args: str,
-    sync_store: settings.SyncStore,
     logger: BoundLogger,
 ) -> None:
     asyncio.create_task(
@@ -189,13 +215,12 @@ async def think_create(
 async def blockedornot_fetch(
     context: commands.Context,
     url: str,
-    sync_store: settings.SyncStore,
     logger: BoundLogger,
 ) -> None:
     async with httpx.AsyncClient() as client:
         asyncio.create_task(
             text_send(
-                await meow_blockedornot(client, url),
+                await meow_blockedornot(client, url, logger),
                 context.message.channel,
                 context.message,
             )
@@ -203,16 +228,15 @@ async def blockedornot_fetch(
 
 
 async def fact_fetch(
-    context: commands.Context, sync_store: settings.SyncStore, logger: BoundLogger
+    context: commands.Context,
+    facts: common.FactCache,
+    lock: threading.Lock,
+    logger: BoundLogger,
 ) -> None:
     async with httpx.AsyncClient() as client:
         asyncio.create_task(
             text_send(
-                await meow_fact(
-                    client,
-                    sync_store.facts,
-                    sync_store.fact_lock,
-                ),
+                await meow_fact(client, facts, lock, logger),
                 context.message.channel,
                 context.message,
             )
@@ -222,7 +246,8 @@ async def fact_fetch(
 async def remind_submit(
     context: commands.Context,
     *args: str,
-    sync_store: settings.SyncStore,
+    tasks: queue.Queue,
+    messages: queue.Queue,
     logger: BoundLogger,
 ) -> None:
     logger.info("DISCORD: Processing remind request", message=context.message)
@@ -232,13 +257,14 @@ async def remind_submit(
             text_send(
                 await meow_remind(
                     " ".join(args).strip(),
-                    sync_store.tasks,
-                    sync_store.discord.messages,
+                    tasks,
+                    messages,
                     lambda content: {
                         "content": content,
                         "channel_id": context.message.channel.id,
                         "message_id": context.message.id,
                     },
+                    logger,
                 ),
                 context.message.channel,
                 context.message,
@@ -258,7 +284,7 @@ async def remind_submit(
 async def on_message(
     message: discord.Message,
     bot: commands.Bot,
-    cats: settings.CatCache,
+    cats: common.CatCache,
     lock: threading.Lock,
     logger: BoundLogger,
 ) -> None:
@@ -276,7 +302,7 @@ async def on_message(
                 message.channel.send(
                     "photo from https://cataas.com/",
                     file=discord.File(
-                        await meow_fetch_photo(client, cats, lock),
+                        await meow_fetch_photo(client, cats, lock, logger),
                         description="photo from https://cataas.com/",
                         filename="meow.png",
                     ),

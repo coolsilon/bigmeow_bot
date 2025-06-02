@@ -10,16 +10,14 @@ from fastapi.responses import PlainTextResponse
 from structlog.stdlib import BoundLogger
 from telegram.constants import ParseMode
 
-import bigmeow.settings as settings
+from bigmeow import common, settings
 from bigmeow.common import get_logger
 from bigmeow.meow import meow_say
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if not hasattr(app.state, "sync_store") and isinstance(
-        app.state, settings.SyncStore
-    ):
+    if not hasattr(app.state, "sync_store") and isinstance(app.state, common.SyncStore):
         raise RuntimeError("Runtime sync_store object is missing")
 
     yield
@@ -64,7 +62,7 @@ def check_login_is_valid(authorization: str | None) -> bool:
 
 
 async def run(
-    sync_store: settings.SyncStore, logger: BoundLogger = get_logger(__name__)
+    sync_store: common.SyncStore, logger: BoundLogger = get_logger(__name__)
 ) -> None:
     app.state.sync_store = sync_store
 

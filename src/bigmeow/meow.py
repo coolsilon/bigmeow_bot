@@ -6,7 +6,7 @@ from functools import reduce
 from io import BytesIO, StringIO
 from queue import Queue
 from random import choice
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 import dateparser
 import httpx
@@ -15,11 +15,17 @@ from cowsay import cowsay, cowthink
 from structlog.stdlib import BoundLogger
 
 from bigmeow import settings
-from bigmeow.common import async_lock, get_logger
-from bigmeow.settings import PetrolChange, PetrolLevel, PetrolPrice
+from bigmeow.common import (
+    CatCache,
+    FactCache,
+    PetrolChange,
+    PetrolLevel,
+    PetrolPrice,
+    async_lock,
+)
 
 
-def meow_sayify(func: Callable) -> Callable:
+def meow_sayify(func: Callable[..., Awaitable[str]]) -> Callable[..., Awaitable[str]]:
     async def wrapped_function(*args, **kwargs) -> str:
         return meow_say(await func(*args, **kwargs), wrap_text=False)
 
@@ -28,7 +34,7 @@ def meow_sayify(func: Callable) -> Callable:
 
 @meow_sayify
 async def meow_blockedornot(
-    client: httpx.AsyncClient, query: str, logger: BoundLogger = get_logger(__name__)
+    client: httpx.AsyncClient, query: str, logger: BoundLogger
 ) -> str:
     url = "https://blockedornot.sinarproject.org/api/"
 
@@ -68,9 +74,9 @@ def meowpetrol_update_latest(
 @meow_sayify
 async def meow_fact(
     client: httpx.AsyncClient,
-    facts: settings.FactCache,
+    facts: FactCache,
     lock: threading.Lock,
-    logger: BoundLogger = get_logger(__name__),
+    logger: BoundLogger,
 ) -> str:
     url = "https://meowfacts.herokuapp.com/"
 
@@ -91,9 +97,9 @@ async def meow_fact(
 @meow_sayify
 async def meow_petrol(
     client: httpx.AsyncClient,
-    petrol: settings.PetrolPrice,
+    petrol: PetrolPrice,
     lock: threading.Lock,
-    logger: BoundLogger = get_logger(__name__),
+    logger: BoundLogger,
 ) -> str:
     url = "https://storage.data.gov.my/commodities/fuelprice.csv"
 
@@ -143,9 +149,9 @@ async def meow_petrol(
 
 async def meow_fetch_photo(
     client: httpx.AsyncClient,
-    cats: settings.CatCache,
+    cats: CatCache,
     lock: threading.Lock,
-    logger: BoundLogger = get_logger(__name__),
+    logger: BoundLogger,
 ) -> BytesIO:
     url = "https://cataas.com/cat/says/meow?type=square"
 
@@ -165,7 +171,7 @@ async def meow_prompt(
     message: str,
     channel: str,
     destination: str,
-    logger: BoundLogger = get_logger(__name__),
+    logger: BoundLogger,
 ) -> None:
     url = f"https://maker.ifttt.com/trigger/prompt/with/key/{settings.IFTTT_KEY}"
     data = {"value1": message, "value2": channel, "value3": destination}
@@ -180,6 +186,7 @@ async def meow_remind(
     task_queue: Queue,
     message_queue: Queue,
     data_builder: Callable[[str], dict[str, Any]],
+    logger: BoundLogger,
 ) -> str:
     text, when = message.rsplit("@", maxsplit=1)
     when = dateparser.parse(when, settings={"TIMEZONE": settings.TIMEZONE.zone})  # type: ignore

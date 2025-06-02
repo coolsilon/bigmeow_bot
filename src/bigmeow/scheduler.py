@@ -9,7 +9,7 @@ from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from structlog.stdlib import BoundLogger
 
-from bigmeow import settings
+from bigmeow import common, settings
 from bigmeow.common import coroutine_repeat_queue, get_logger
 
 
@@ -28,7 +28,7 @@ async def task_consume(
 
 
 async def run(
-    sync_store: settings.SyncStore, logger: BoundLogger = get_logger(__name__)
+    sync_store: common.SyncStore, logger: BoundLogger = get_logger(__name__)
 ) -> None:
     logger.info("SCHEDULER: Starting")
     scheduler = AsyncIOScheduler(
