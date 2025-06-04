@@ -94,7 +94,7 @@ async def fact_fetch(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     facts: common.FactCache,
-    fact_lock: threading.Lock,
+    lock: threading.Lock,
     logger: BoundLogger,
 ) -> None:
     logger.info("TELEGRAM: Processing fact request", update=update)
@@ -105,7 +105,7 @@ async def fact_fetch(
                 context.bot.send_message(
                     chat_id=update.effective_chat.id,
                     parse_mode=ParseMode.MARKDOWN,
-                    text=await meow_fact(client, facts, fact_lock, logger),
+                    text=await meow_fact(client, facts, lock, logger),
                     reply_to_message_id=update.message.id,
                     allow_sending_without_reply=True,
                 )
@@ -336,13 +336,15 @@ async def remind_submit(
                         "reply_to_message_id": update.message.id,  # type: ignore
                         "allow_sending_without_reply": True,
                     },
+                    logger,
                 ),
                 reply_to_message_id=update.message.id,
                 allow_sending_without_reply=True,
             )
         )
 
-    except (ValueError, AssertionError):
+    except (ValueError, AssertionError) as e:
+        logger.exception(e)  # type: ignore
         asyncio.create_task(
             context.bot.send_message(
                 chat_id=update.effective_chat.id,  # type: ignore

@@ -6,7 +6,8 @@ from contextlib import suppress
 from functools import partial
 from io import StringIO
 from multiprocessing.synchronize import Event as Event
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, Callable
 
 import discord
 import httpx
@@ -116,6 +117,12 @@ def setup(bot: commands.Bot, sync_store: common.SyncStore, logger: BoundLogger) 
     )
 
 
+def command_make(
+    command: MeowCommand, func: Callable[..., Any], logger: BoundLogger, **kwargs: Any
+):
+    return commands.command(command.value, extras=dict(logger=logger, **kwargs))(func)
+
+
 async def messages_consume(
     bot: commands.Bot, messages: queue.Queue, logger: BoundLogger
 ) -> None:
@@ -144,36 +151,28 @@ async def messages_consume(
         asyncio.create_task(text_send(data["content"], channel, message))
 
 
-def command_make(command: MeowCommand, func, logger: BoundLogger, **kwargs: Any):
-    @commands.command(command.value)
-    async def inner(*args_inner, **kwargs_inner):
-        return await func(*args_inner, **kwargs_inner, **kwargs, logger=logger)
+async def petrol_fetch(context: commands.Context) -> None:
+    assert context.command
 
-    return inner
-
-
-async def petrol_fetch(
-    context: commands.Context,
-    petrol: common.PetrolPrice,
-    lock: threading.Lock,
-    logger: BoundLogger,
-) -> None:
-    logger.info("DISCORD: Received a command", message=context.message)
+    extras = SimpleNamespace(**context.command.extras)
+    extras.logger.info("DISCORD: Received a command", message=context.message)
 
     async with httpx.AsyncClient() as client:
         asyncio.create_task(
             text_send(
-                await meow_petrol(client, petrol, lock, logger),
+                await meow_petrol(
+                    client,
+                    extras.petrol,
+                    extras.lock,
+                    extras.logger,
+                ),
                 context.message.channel,
                 context.message,
             )
         )
 
-async def say_create(
-    context: commands.Context,
-    *args: str,
-    logger: BoundLogger,
-) -> None:
+
+async def say_create(context: commands.Context, *args: str) -> None:
     asyncio.create_task(
         text_send(
             meow_say(" ".join(args).strip()),
@@ -183,26 +182,22 @@ async def say_create(
     )
 
 
-async def prompt_create(
-    context: commands.Context,
-    *args: str,
-    logger: BoundLogger,
-) -> None:
+async def prompt_create(context: commands.Context, *args: str) -> None:
+    assert context.command
+
+    extras = SimpleNamespace(**context.command.extras)
+
     async with httpx.AsyncClient() as client:
         await meow_prompt(
             client,
             " ".join(args).strip(),
             channel="discord",
             destination=json.dumps((context.message.channel.id, context.message.id)),
-            logger=logger,
+            logger=extras.logger,
         )
 
 
-async def think_create(
-    context: commands.Context,
-    *args: str,
-    logger: BoundLogger,
-) -> None:
+async def think_create(context: commands.Context, *args: str) -> None:
     asyncio.create_task(
         text_send(
             meow_say(" ".join(args).strip(), is_cowthink=True),
@@ -212,66 +207,68 @@ async def think_create(
     )
 
 
-async def blockedornot_fetch(
-    context: commands.Context,
-    url: str,
-    logger: BoundLogger,
-) -> None:
+async def blockedornot_fetch(context: commands.Context, url: str) -> None:
+    assert context.command
+
+    extras = SimpleNamespace(**context.command.extras)
+
     async with httpx.AsyncClient() as client:
         asyncio.create_task(
             text_send(
-                await meow_blockedornot(client, url, logger),
+                await meow_blockedornot(client, url, extras.logger),
                 context.message.channel,
                 context.message,
             )
         )
 
 
-async def fact_fetch(
-    context: commands.Context,
-    facts: common.FactCache,
-    lock: threading.Lock,
-    logger: BoundLogger,
-) -> None:
+async def fact_fetch(context: commands.Context) -> None:
+    assert context.command
+
+    extras = SimpleNamespace(**context.command.extras)
+
     async with httpx.AsyncClient() as client:
         asyncio.create_task(
             text_send(
-                await meow_fact(client, facts, lock, logger),
-                context.message.channel,
-                context.message,
-            )
-        )
-
-
-async def remind_submit(
-    context: commands.Context,
-    *args: str,
-    tasks: queue.Queue,
-    messages: queue.Queue,
-    logger: BoundLogger,
-) -> None:
-    logger.info("DISCORD: Processing remind request", message=context.message)
-
-    try:
-        asyncio.create_task(
-            text_send(
-                await meow_remind(
-                    " ".join(args).strip(),
-                    tasks,
-                    messages,
-                    lambda content: {
-                        "content": content,
-                        "channel_id": context.message.channel.id,
-                        "message_id": context.message.id,
-                    },
-                    logger,
+                await meow_fact(
+                    client,
+                    extras.facts,
+                    extras.lock,
+                    extras.logger,
                 ),
                 context.message.channel,
                 context.message,
             )
         )
 
-    except (ValueError, AssertionError):
+
+async def remind_submit(context: commands.Context, *args: str) -> None:
+    assert context.command
+
+    extras = SimpleNamespace(**context.command.extras)
+    extras.logger.info("DISCORD: Processing remind request", message=context.message)
+
+    try:
+        asyncio.create_task(
+            text_send(
+                await meow_remind(
+                    " ".join(args).strip(),
+                    extras.tasks,
+                    extras.messages,
+                    lambda content: {
+                        "content": content,
+                        "channel_id": context.message.channel.id,
+                        "message_id": context.message.id,
+                    },
+                    extras.logger,
+                ),
+                context.message.channel,
+                context.message,
+            )
+        )
+
+    except (ValueError, AssertionError) as e:
+        extras.logger.exception(e)  # type: ignore
         asyncio.create_task(
             text_send(
                 "Fail to schedule message, please check format again",
