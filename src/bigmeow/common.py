@@ -4,6 +4,7 @@ import threading
 from abc import ABC
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import date
 from enum import Enum
 from io import BytesIO
@@ -12,7 +13,6 @@ from random import choice, randint, shuffle
 from typing import Any, Awaitable, NamedTuple
 
 import structlog
-from attr import dataclass
 
 from bigmeow import settings
 

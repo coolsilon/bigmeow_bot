@@ -36,9 +36,6 @@ TELEGRAM_USER=<OWNER TELEGRAM CHAT ID>
 WEBHOOK_URL=<URL TO WEBHOOK>
 DEBUG=<True IF RUNNING LOCALLY OTHERWISE False>
 IFTTT_KEY=<IFTTT_TOKEN>
-SLACK_SECRET_SIGN=<SLACK SIGNING SECRET>
-SLACK_SECRET_CLIENT=<SLACK CLIENT SECRET>
-SLACK_CLIENT_ID=<SLACK CLIENT ID>
 DATABASE_URL=postgresql+psycopg://<DATABASE_USER>:<DATABASE_PASSWORD>@<DATABASE_HOST>:<DATABASE_PORT>/<DATABASE_NAME>
 ```
 
@@ -58,9 +55,5 @@ $ poetry run python -m bigmeow.main
 
 Optionally, you can run the application with the following options:
 
-* `--noweb` to run without a web frontend
 * `--notg` to run without a telegram bot
 * `--nodiscord` to run without a discord bot
-* `--noslack` to run without a slack bot
-
-Notice slack and telegram bot would fail to receive event input without the web frontend
