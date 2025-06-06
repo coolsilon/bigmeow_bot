@@ -135,6 +135,23 @@ async def meow_create(
         )
 
 
+async def message_produce(
+    message: str, queue, chat_id, message_id, logger: BoundLogger
+):
+    asyncio.create_task(
+        asyncio.to_thread(
+            queue.put,
+            {
+                "text": meow_say(message),
+                "chat_id": chat_id,
+                "parse_mode": ParseMode.MARKDOWN,
+                "reply_to_message_id": message_id,
+                "allow_sending_without_reply": True,
+            },
+        )
+    )
+
+
 async def messages_consume(
     application: Application, messages: queue.Queue, logger: BoundLogger
 ) -> None:
@@ -323,20 +340,18 @@ async def remind_submit(
             context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 parse_mode=ParseMode.MARKDOWN,
-                text=await meow_remind(
-                    update.message.text.replace(MeowCommand.REMIND.telegram(), "")
-                    .replace(str(MeowCommand.REMIND), "")
-                    .strip(),
-                    tasks,
-                    messages,
-                    lambda content: {
-                        "text": content,
-                        "chat_id": update.effective_chat.id,  # type: ignore
-                        "parse_mode": ParseMode.MARKDOWN,
-                        "reply_to_message_id": update.message.id,  # type: ignore
-                        "allow_sending_without_reply": True,
-                    },
-                    logger,
+                text=meow_say(
+                    await meow_remind(
+                        update.message.text.replace(MeowCommand.REMIND.telegram(), "")
+                        .replace(str(MeowCommand.REMIND), "")
+                        .strip(),
+                        tasks,
+                        logger,
+                        message_produce,
+                        messages,
+                        update.effective_chat.id,
+                        update.message.id,
+                    )
                 ),
                 reply_to_message_id=update.message.id,
                 allow_sending_without_reply=True,

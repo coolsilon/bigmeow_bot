@@ -8,11 +8,9 @@ import uvicorn
 from fastapi import Depends, FastAPI, Header, Request
 from fastapi.responses import PlainTextResponse
 from structlog.stdlib import BoundLogger
-from telegram.constants import ParseMode
 
-from bigmeow import common, settings
+from bigmeow import common, discord, settings, telegram
 from bigmeow.common import get_logger
-from bigmeow.meow import meow_say
 
 
 @asynccontextmanager
@@ -131,6 +129,20 @@ async def telegram_webhook(
     )
 
 
+@app.get("/api/scheduled")
+async def scheduled(request: Request, logger: BoundLogger = Depends(Logger())):
+    logger.info(request.app.state.sync_store.scheduled)
+    return [
+        {
+            "id": job.id,
+            "name": job.name,
+            "executor": job.executor,
+            "when": job.next_run_time,
+        }
+        for job in request.app.state.sync_store.scheduled
+    ]
+
+
 @app.post(settings.ECHO_WEBHOOK, include_in_schema=False)
 async def chat_post(
     request: Request,
@@ -138,6 +150,7 @@ async def chat_post(
     x_destination: Annotated[str, Header()],
     logger: BoundLogger = Depends(Logger()),
 ) -> None:
+    # FIXME need auth
     text = (await request.body()).decode()
 
     logger.info(
@@ -148,31 +161,22 @@ async def chat_post(
     )
     match x_channel:
         case "telegram":
-            chat_id, message_id = json.loads(x_destination)
-
             asyncio.create_task(
-                asyncio.to_thread(
-                    request.app.state.sync_store.telegram.messages.put,
-                    {
-                        "text": meow_say(text),
-                        "chat_id": chat_id,
-                        "parse_mode": ParseMode.MARKDOWN,
-                        "reply_to_message_id": message_id,
-                        "allow_sending_without_reply": True,
-                    },
+                telegram.message_produce(
+                    text,
+                    request.app.state.sync_store.telegram.messages,
+                    *json.loads(x_destination),
+                    logger=logger,
                 )
             )
 
         case "discord":
-            channel_id, message_id = json.loads(x_destination)
             asyncio.create_task(
-                asyncio.to_thread(
-                    request.app.state.sync_store.discord.messages.put,
-                    {
-                        "content": meow_say(text),
-                        "channel_id": channel_id,
-                        "message_id": message_id,
-                    },
+                discord.message_produce(
+                    text,
+                    request.app.state.sync_store.discord.messages,
+                    *json.loads(x_destination),
+                    logger=logger,
                 )
             )
 

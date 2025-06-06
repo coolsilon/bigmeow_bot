@@ -1,12 +1,13 @@
 import asyncio
 import csv
 import threading
+from collections.abc import Awaitable, Callable
 from datetime import date, timedelta
 from functools import reduce
 from io import BytesIO, StringIO
 from queue import Queue
 from random import choice
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 import dateparser
 import httpx
@@ -184,9 +185,9 @@ async def meow_prompt(
 async def meow_remind(
     message: str,
     task_queue: Queue,
-    message_queue: Queue,
-    data_builder: Callable[[str], dict[str, Any]],
     logger: BoundLogger,
+    func: Callable[..., Awaitable[Any]],
+    *args: Any,
 ) -> str:
     text, when = message.rsplit("@", maxsplit=1)
     when = dateparser.parse(when, settings={"TIMEZONE": settings.TIMEZONE.zone})  # type: ignore
@@ -196,17 +197,16 @@ async def meow_remind(
     await asyncio.to_thread(
         task_queue.put,
         {
-            "func": "bigmeow.scheduler:execute_sync",
+            "func": func,
+            "name": message,
             "trigger": DateTrigger(when, settings.TIMEZONE),
-            "args": (
-                message_queue.put,
-                data_builder(meow_say(text)),
-            ),
+            "args": (text, *args),
+            "kwargs": {"logger": logger},
             "misfire_grace_time": None,
         },
     )
 
-    return f"Scheduled message: {text}\nTime: {when}"
+    return f"Scheduled message: {text}\n\nTime: {when}"
 
 
 def meow_say(message: str, is_cowthink: bool = False, wrap_text: bool = True) -> str:

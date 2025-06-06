@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import threading
 from abc import ABC
 from collections.abc import Callable
 from contextlib import asynccontextmanager
@@ -8,8 +7,10 @@ from dataclasses import dataclass
 from datetime import date
 from enum import Enum
 from io import BytesIO
+from multiprocessing.managers import ListProxy
 from queue import Queue
 from random import choice, randint, shuffle
+from threading import Event, Lock
 from typing import Any, Awaitable, NamedTuple
 
 import structlog
@@ -127,24 +128,25 @@ class DiscordSyncStore:
 
 @dataclass
 class SyncStore:
-    exit_event: threading.Event
+    exit_event: Event
     telegram: TelegramSyncStore
     discord: DiscordSyncStore
 
     cats: CatCache
-    cat_lock: threading.Lock
+    cat_lock: Lock
 
     facts: FactCache
-    fact_lock: threading.Lock
+    fact_lock: Lock
 
     petrol: PetrolPrice
-    petrol_lock: threading.Lock
+    petrol_lock: Lock
 
     tasks: Queue
+    scheduled: ListProxy
 
 
 @asynccontextmanager
-async def async_lock(lock: threading.Lock):
+async def async_lock(lock: Lock):
     await asyncio.to_thread(lock.acquire)
 
     try:
@@ -157,6 +159,7 @@ def message_contains(message: str | None, content: str, is_command=True) -> bool
     message = message or ""
 
     return (message.startswith(content)) if is_command else (content in message.lower())
+
 
 async def coroutine_repeat_queue(
     coro_func: Callable[..., Awaitable[None]], *args: Any

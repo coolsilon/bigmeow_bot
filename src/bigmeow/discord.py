@@ -123,6 +123,21 @@ def command_make(
     return commands.command(command.value, extras=dict(logger=logger, **kwargs))(func)
 
 
+async def message_produce(
+    message: str, queue: queue.Queue, channel_id, message_id, logger: BoundLogger
+):
+    asyncio.create_task(
+        asyncio.to_thread(
+            queue.put,
+            {
+                "content": meow_say(message),
+                "channel_id": channel_id,
+                "message_id": message_id,
+            },
+        )
+    )
+
+
 async def messages_consume(
     bot: commands.Bot, messages: queue.Queue, logger: BoundLogger
 ) -> None:
@@ -251,16 +266,16 @@ async def remind_submit(context: commands.Context, *args: str) -> None:
     try:
         asyncio.create_task(
             text_send(
-                await meow_remind(
-                    " ".join(args).strip(),
-                    extras.tasks,
-                    extras.messages,
-                    lambda content: {
-                        "content": content,
-                        "channel_id": context.message.channel.id,
-                        "message_id": context.message.id,
-                    },
-                    extras.logger,
+                meow_say(
+                    await meow_remind(
+                        " ".join(args).strip(),
+                        extras.tasks,
+                        extras.logger,
+                        message_produce,
+                        extras.messages,
+                        context.message.channel.id,
+                        context.message.id,
+                    )
                 ),
                 context.message.channel,
                 context.message,

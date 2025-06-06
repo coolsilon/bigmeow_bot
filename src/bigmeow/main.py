@@ -89,6 +89,7 @@ def main(
         ),
         manager.Lock(),
         manager.Queue(),
+        manager.list()
     )
 
     with ProcessPoolExecutor(max_workers=10) as executor:

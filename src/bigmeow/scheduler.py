@@ -1,10 +1,13 @@
 import asyncio
 from collections.abc import Callable
 from contextlib import suppress
+from dataclasses import dataclass
+from multiprocessing.managers import ListProxy
 from queue import Empty, Queue
 from typing import Any
 
-from apscheduler.executors.pool import ProcessPoolExecutor
+from apscheduler import events
+from apscheduler.executors.asyncio import AsyncIOExecutor
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from structlog.stdlib import BoundLogger
@@ -13,8 +16,21 @@ from bigmeow import common, settings
 from bigmeow.common import coroutine_repeat_queue, get_logger
 
 
-def execute_sync(callable: Callable[..., Any], *args) -> None:
-    callable(*args)
+@dataclass
+class ScheduledUpdater:
+    scheduler: AsyncIOScheduler
+    event_loop: asyncio.AbstractEventLoop
+    scheduled: ListProxy
+    lock: asyncio.Lock
+    logger: BoundLogger
+
+    def __call__(self, event):
+        self.event_loop.create_task(self.run(event))
+
+    async def run(self, event):
+        self.logger.info("Updating jobs", on_event=event)
+        async with self.lock:
+            self.scheduled[:] = self.scheduler.get_jobs()
 
 
 async def task_consume(
@@ -37,7 +53,19 @@ async def run(
         jobstores={
             settings.TASK_DEFAULT_STORE: SQLAlchemyJobStore(settings.DATABASE_URL)
         },
-        executors={settings.TASK_DEFAULT_EXECUTOR: ProcessPoolExecutor(10)},
+        executors={
+            settings.TASK_DEFAULT_EXECUTOR: AsyncIOExecutor(),
+        },
+    )
+    scheduler.add_listener(
+        ScheduledUpdater(
+            scheduler,
+            asyncio.get_running_loop(),
+            sync_store.scheduled,
+            asyncio.Lock(),
+            logger,
+        ),
+        events.EVENT_ALL,
     )
     scheduler.start()
 

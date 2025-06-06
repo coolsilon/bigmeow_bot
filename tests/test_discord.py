@@ -10,6 +10,7 @@ from structlog.stdlib import BoundLogger
 from bigmeow.discord import (
     blockedornot_fetch,
     fact_fetch,
+    message_produce,
     petrol_fetch,
     prompt_create,
     remind_submit,
@@ -186,8 +187,12 @@ async def test_fact_fetch(
 async def test_remind_submit(
     logger: BoundLogger, context: commands.Context, text_send: AsyncMock
 ):
-    with patch("bigmeow.discord.meow_remind") as meow_remind:
+    with (
+        patch("bigmeow.discord.meow_remind") as meow_remind,
+        patch("bigmeow.discord.meow_say") as meow_say,
+    ):
         meow_remind.return_value = "scheduled"
+        meow_say.return_value = "meowed scheduled"
 
         assert context.command
         context.command.extras = {
@@ -198,21 +203,16 @@ async def test_remind_submit(
 
         await remind_submit(context, "do", "this", "@", "5", "seconds", "later")
 
-        meow_remind.assert_awaited_once()
-
-        assert "do this @ 5 seconds later" == meow_remind.call_args.args[0]
-        assert context.command.extras["tasks"] == meow_remind.call_args.args[1]
-        assert context.command.extras["messages"] == meow_remind.call_args.args[2]
-        assert logger == meow_remind.call_args.args[4]
-
-        result = meow_remind.call_args.args[3]("do this")
-        expected = {
-            "content": "do this",
-            "channel_id": context.message.channel.id,
-            "message_id": context.message.id,
-        }
-        assert expected == result
+        meow_remind.assert_awaited_once_with(
+            "do this @ 5 seconds later",
+            context.command.extras["tasks"],
+            context.command.extras["logger"],
+            message_produce,
+            context.command.extras["messages"],
+            context.message.channel.id,
+            context.message.id,
+        )
 
         text_send.assert_called_once_with(
-            "scheduled", context.message.channel, context.message
+            meow_say("scheduled"), context.message.channel, context.message
         )
