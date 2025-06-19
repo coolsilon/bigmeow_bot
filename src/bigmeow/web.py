@@ -144,12 +144,16 @@ async def scheduled(request: Request, logger: BoundLogger = Depends(Logger())):
 
 
 @app.post(settings.ECHO_WEBHOOK, include_in_schema=False)
-async def chat_post(
+async def echo_message(
     request: Request,
+    x_echo_token: Annotated[str, Header()],
     x_channel: Annotated[str, Header()],
     x_destination: Annotated[str, Header()],
     logger: BoundLogger = Depends(Logger()),
 ) -> None:
+    if not settings.ECHO_TOKEN == x_echo_token:
+        raise Exception("Bad token")
+
     # FIXME need auth
     text = (await request.body()).decode()
 
@@ -181,4 +185,4 @@ async def chat_post(
             )
 
         case _:
-            raise Exception("Invalid channel")
+            raise Exception("Invalid echo channel")

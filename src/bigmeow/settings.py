@@ -32,6 +32,7 @@ DISCORD_TOKEN = environ["DISCORD_TOKEN"]
 DISCORD_USER = int(environ["DISCORD_USER"])
 
 ECHO_WEBHOOK = "/webhook/echo"
+ECHO_TOKEN = environ["ECHO_TOKEN"]
 
 TASK_DEFAULT_STORE = "default"
 TASK_DEFAULT_EXECUTOR = "default"
