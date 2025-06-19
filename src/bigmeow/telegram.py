@@ -1,10 +1,10 @@
 import asyncio
 import json
 import queue
+import threading
 from contextlib import suppress
 from dataclasses import dataclass
 from functools import partial
-from multiprocessing.synchronize import Event
 from typing import Any, Callable
 
 import httpx
@@ -21,8 +21,9 @@ from telegram.ext import (
 )
 from telegram.ext.filters import MessageFilter
 
-import bigmeow.settings as settings
+from bigmeow import common, settings
 from bigmeow.common import (
+    MeowCommand,
     coroutine_repeat_queue,
     get_logger,
     message_contains,
@@ -36,9 +37,6 @@ from bigmeow.meow import (
     meow_remind,
     meow_say,
 )
-from bigmeow.settings import MeowCommand
-
-application = ApplicationBuilder().token(settings.TELEGRAM_TOKEN).build()
 
 
 @dataclass
@@ -51,7 +49,9 @@ class Filter(MessageFilter):
 
 
 async def blockedornot_fetch(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, logger: BoundLogger
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    logger: BoundLogger,
 ) -> None:
     logger.info("TELEGRAM: Processing isblocked request", update=update)
 
@@ -68,6 +68,7 @@ async def blockedornot_fetch(
                         )
                         .replace(str(MeowCommand.ISBLOCKED), "")
                         .strip(),
+                        logger,
                     ),
                     reply_to_message_id=update.message.id,
                     allow_sending_without_reply=True,
@@ -76,18 +77,25 @@ async def blockedornot_fetch(
 
 
 def command_handler_pair(
-    command: MeowCommand, handler: Callable[..., Any], logger: BoundLogger
+    command: MeowCommand,
+    handler: Callable[..., Any],
+    logger: BoundLogger,
+    **kwargs: Any,
 ) -> tuple[CommandHandler, MessageHandler]:
     return CommandHandler(
-        command.value, partial(handler, logger=logger)
+        command.value, partial(handler, logger=logger, **kwargs)
     ), MessageHandler(
         Filter(str(command), True),
-        partial(handler, logger=logger),
+        partial(handler, logger=logger, **kwargs),
     )
 
 
 async def fact_fetch(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, logger: BoundLogger
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    facts: common.FactCache,
+    lock: threading.Lock,
+    logger: BoundLogger,
 ) -> None:
     logger.info("TELEGRAM: Processing fact request", update=update)
 
@@ -97,7 +105,7 @@ async def fact_fetch(
                 context.bot.send_message(
                     chat_id=update.effective_chat.id,
                     parse_mode=ParseMode.MARKDOWN,
-                    text=await meow_fact(client),
+                    text=await meow_fact(client, facts, lock, logger),
                     reply_to_message_id=update.message.id,
                     allow_sending_without_reply=True,
                 )
@@ -105,7 +113,11 @@ async def fact_fetch(
 
 
 async def meow_create(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, logger: BoundLogger
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    cats: common.CatCache,
+    lock: threading.Lock,
+    logger: BoundLogger,
 ) -> None:
     if not (update.message and update.effective_chat):
         return
@@ -115,7 +127,7 @@ async def meow_create(
         asyncio.create_task(
             context.bot.send_photo(
                 chat_id=update.effective_chat.id,
-                photo=await meow_fetch_photo(client),
+                photo=await meow_fetch_photo(client, cats, lock, logger),
                 caption="photo from https://cataas.com/",
                 reply_to_message_id=update.message.id,
                 allow_sending_without_reply=True,
@@ -123,19 +135,39 @@ async def meow_create(
         )
 
 
-async def messages_consume(application: Application, logger: BoundLogger) -> None:
-    with suppress(queue.Empty):
-        message = await asyncio.to_thread(
-            settings.telegram_messages.get,
-            timeout=settings.QUEUE_TIMEOUT,
+async def message_produce(
+    message: str, queue, chat_id, message_id, logger: BoundLogger
+):
+    asyncio.create_task(
+        asyncio.to_thread(
+            queue.put,
+            {
+                "text": meow_say(message),
+                "chat_id": chat_id,
+                "parse_mode": ParseMode.MARKDOWN,
+                "reply_to_message_id": message_id,
+                "allow_sending_without_reply": True,
+            },
         )
+    )
+
+
+async def messages_consume(
+    application: Application, messages: queue.Queue, logger: BoundLogger
+) -> None:
+    with suppress(queue.Empty):
+        message = await asyncio.to_thread(messages.get, timeout=settings.QUEUE_TIMEOUT)
 
         logger.info("TELEGRAM: Processing message reply")
         asyncio.create_task(application.bot.send_message(**message))
 
 
 async def petrol_fetch(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, logger: BoundLogger
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    petrol: common.PetrolPrice,
+    petrol_lock: threading.Lock,
+    logger: BoundLogger,
 ) -> None:
     logger.info("TELEGRAM: Processing petrol request", update=update)
 
@@ -145,7 +177,7 @@ async def petrol_fetch(
                 context.bot.send_message(
                     chat_id=update.effective_chat.id,
                     parse_mode=ParseMode.MARKDOWN,
-                    text=await meow_petrol(client),
+                    text=await meow_petrol(client, petrol, petrol_lock, logger),
                     reply_to_message_id=update.message.id,
                     allow_sending_without_reply=True,
                 )
@@ -153,11 +185,12 @@ async def petrol_fetch(
 
 
 async def run(
-    exit_event: Event,
-    application: Application = application,
+    sync_store: common.SyncStore,
     logger: BoundLogger = get_logger(__name__),
 ) -> None:
-    await setup(application, logger)
+    application = ApplicationBuilder().token(settings.TELEGRAM_TOKEN).build()
+
+    await setup(application, sync_store, logger)
 
     async with application:
         logger.info("TELEGRAM: Starting")
@@ -176,34 +209,65 @@ async def run(
                 text=meow_say("Bot is up"),
             )
 
-        asyncio.create_task(coroutine_repeat_queue(updates_consume, application))
         asyncio.create_task(
-            coroutine_repeat_queue(messages_consume, application, logger)
+            coroutine_repeat_queue(
+                updates_consume, application, sync_store.telegram.updates, logger
+            )
+        )
+        asyncio.create_task(
+            coroutine_repeat_queue(
+                messages_consume, application, sync_store.telegram.messages, logger
+            )
         )
 
-        await asyncio.to_thread(exit_event.wait)
+        await asyncio.to_thread(sync_store.exit_event.wait)
 
         logger.info("TELEGRAM: Stopping")
         await application.stop()
 
 
-async def setup(application: Application, logger: BoundLogger) -> None:
+async def setup(
+    application: Application, sync_store: common.SyncStore, logger: BoundLogger
+) -> None:
     logger.info("TELEGRAM: Initializing application")
 
     application.add_handlers(
         list(
-            command_handler_pair(MeowCommand.PETROL, petrol_fetch, logger)
+            command_handler_pair(
+                MeowCommand.PETROL,
+                petrol_fetch,
+                logger,
+                petrol=sync_store.petrol,
+                petrol_lock=sync_store.petrol_lock,
+            )
             + command_handler_pair(MeowCommand.SAY, say_create, logger)
             + command_handler_pair(MeowCommand.THINK, think_create, logger)
             + command_handler_pair(MeowCommand.PROMPT, prompt_create, logger)
-            + command_handler_pair(MeowCommand.FACT, fact_fetch, logger)
+            + command_handler_pair(
+                MeowCommand.FACT,
+                fact_fetch,
+                logger,
+                facts=sync_store.facts,
+                lock=sync_store.fact_lock,
+            )
             + command_handler_pair(MeowCommand.ISBLOCKED, blockedornot_fetch, logger)
-            + command_handler_pair(MeowCommand.REMIND, remind_submit, logger)
+            + command_handler_pair(
+                MeowCommand.REMIND,
+                remind_submit,
+                logger,
+                tasks=sync_store.tasks,
+                messages=sync_store.telegram.messages,
+            )
         )
         + [
             MessageHandler(
                 Filter("meow", False),
-                partial(meow_create, logger=logger),
+                partial(
+                    meow_create,
+                    logger=logger,
+                    cats=sync_store.cats,
+                    lock=sync_store.cat_lock,
+                ),
             )
         ]
     )
@@ -218,7 +282,9 @@ async def setup(application: Application, logger: BoundLogger) -> None:
 
 
 async def prompt_create(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, logger: BoundLogger
+    update: Update,
+    _context: ContextTypes.DEFAULT_TYPE,
+    logger: BoundLogger,
 ) -> None:
     logger.info("TELEGRAM: Dispatching prompt request", update=update)
 
@@ -229,13 +295,16 @@ async def prompt_create(
                 update.message.text.replace(MeowCommand.PROMPT.telegram(), "")
                 .replace(str(MeowCommand.PROMPT), "")
                 .strip(),
-                channel="telegram",
-                destination=json.dumps((update.effective_chat.id, update.message.id)),
+                "telegram",
+                json.dumps((update.effective_chat.id, update.message.id)),
+                logger,
             )
 
 
 async def say_create(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, logger: BoundLogger
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    logger: BoundLogger,
 ) -> None:
     logger.info("TELEGRAM: Processing say request", update=update)
 
@@ -256,7 +325,11 @@ async def say_create(
 
 
 async def remind_submit(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, logger: BoundLogger
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    tasks: queue.Queue,
+    messages: queue.Queue,
+    logger: BoundLogger,
 ) -> None:
     logger.info("TELEGRAM: Processing remind request", update=update)
 
@@ -267,25 +340,26 @@ async def remind_submit(
             context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 parse_mode=ParseMode.MARKDOWN,
-                text=await meow_remind(
-                    update.message.text.replace(MeowCommand.REMIND.telegram(), "")
-                    .replace(str(MeowCommand.REMIND), "")
-                    .strip(),
-                    settings.telegram_messages,
-                    lambda content: {
-                        "text": content,
-                        "chat_id": update.effective_chat.id,  # type: ignore
-                        "parse_mode": ParseMode.MARKDOWN,
-                        "reply_to_message_id": update.message.id,  # type: ignore
-                        "allow_sending_without_reply": True,
-                    },
+                text=meow_say(
+                    await meow_remind(
+                        update.message.text.replace(MeowCommand.REMIND.telegram(), "")
+                        .replace(str(MeowCommand.REMIND), "")
+                        .strip(),
+                        tasks,
+                        logger,
+                        message_produce,
+                        messages,
+                        update.effective_chat.id,
+                        update.message.id,
+                    )
                 ),
                 reply_to_message_id=update.message.id,
                 allow_sending_without_reply=True,
             )
         )
 
-    except (ValueError, AssertionError):
+    except (ValueError, AssertionError) as e:
+        logger.exception(e)  # type: ignore
         asyncio.create_task(
             context.bot.send_message(
                 chat_id=update.effective_chat.id,  # type: ignore
@@ -298,7 +372,9 @@ async def remind_submit(
 
 
 async def think_create(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, logger: BoundLogger
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    logger: BoundLogger,
 ) -> None:
     logger.info("TELEGRAM: Processing think request", update=update)
 
@@ -319,13 +395,15 @@ async def think_create(
         )
 
 
-async def updates_consume(application: Application) -> None:
+async def updates_consume(
+    application: Application, updates: queue.Queue, logger: BoundLogger
+) -> None:
     with suppress(queue.Empty):
         asyncio.create_task(
             application.update_queue.put(
                 Update.de_json(
                     await asyncio.to_thread(
-                        settings.telegram_updates.get,
+                        updates.get,
                         timeout=settings.QUEUE_TIMEOUT,
                     ),
                     application.bot,

@@ -1,6 +1,6 @@
 import asyncio
 import json
-from multiprocessing.synchronize import Event
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 import aiohttp
@@ -8,13 +8,20 @@ import uvicorn
 from fastapi import Depends, FastAPI, Header, Request
 from fastapi.responses import PlainTextResponse
 from structlog.stdlib import BoundLogger
-from telegram.constants import ParseMode
 
-import bigmeow.settings as settings
+from bigmeow import common, discord, settings, telegram
 from bigmeow.common import get_logger
-from bigmeow.meow import meow_say
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if not hasattr(app.state, "sync_store") and isinstance(app.state, common.SyncStore):
+        raise RuntimeError("Runtime sync_store object is missing")
+
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 class Logger:
@@ -52,10 +59,14 @@ def check_login_is_valid(authorization: str | None) -> bool:
     return result
 
 
-async def run(exit_event: Event, logger: BoundLogger = get_logger(__name__)) -> None:
+async def run(
+    sync_store: common.SyncStore, logger: BoundLogger = get_logger(__name__)
+) -> None:
+    app.state.sync_store = sync_store
+
     server = uvicorn.Server(
         uvicorn.Config(
-            "bigmeow.web:app",
+            app,
             host="0.0.0.0",
             port=settings.WEBHOOK_PORT,
             log_level="info",
@@ -72,7 +83,7 @@ async def run(exit_event: Event, logger: BoundLogger = get_logger(__name__)) -> 
     else:
         raise Exception("Website is unreachable")
 
-    await asyncio.to_thread(exit_event.wait)
+    await asyncio.to_thread(sync_store.exit_event.wait)
 
     logger.info("WEB: Webserver is stopping")
     await server.shutdown()
@@ -112,19 +123,38 @@ async def telegram_webhook(
     logger.info("WEBHOOK: Webhook receives a telegram request")
     asyncio.create_task(
         asyncio.to_thread(
-            settings.telegram_updates.put,
+            request.app.state.sync_store.telegram.updates.put,
             await request.json(),
         )
     )
 
 
+@app.get("/api/scheduled")
+async def scheduled(request: Request, logger: BoundLogger = Depends(Logger())):
+    logger.info(request.app.state.sync_store.scheduled)
+    return [
+        {
+            "id": job.id,
+            "name": job.name,
+            "executor": job.executor,
+            "when": job.next_run_time,
+        }
+        for job in request.app.state.sync_store.scheduled
+    ]
+
+
 @app.post(settings.ECHO_WEBHOOK, include_in_schema=False)
-async def chat_post(
+async def echo_message(
     request: Request,
+    x_echo_token: Annotated[str, Header()],
     x_channel: Annotated[str, Header()],
     x_destination: Annotated[str, Header()],
     logger: BoundLogger = Depends(Logger()),
 ) -> None:
+    if not settings.ECHO_TOKEN == x_echo_token:
+        raise Exception("Bad token")
+
+    # FIXME need auth
     text = (await request.body()).decode()
 
     logger.info(
@@ -135,33 +165,24 @@ async def chat_post(
     )
     match x_channel:
         case "telegram":
-            chat_id, message_id = json.loads(x_destination)
-
             asyncio.create_task(
-                asyncio.to_thread(
-                    settings.telegram_messages.put,
-                    {
-                        "text": meow_say(text),
-                        "chat_id": chat_id,
-                        "parse_mode": ParseMode.MARKDOWN,
-                        "reply_to_message_id": message_id,
-                        "allow_sending_without_reply": True,
-                    },
+                telegram.message_produce(
+                    text,
+                    request.app.state.sync_store.telegram.messages,
+                    *json.loads(x_destination),
+                    logger=logger,
                 )
             )
 
         case "discord":
-            channel_id, message_id = json.loads(x_destination)
             asyncio.create_task(
-                asyncio.to_thread(
-                    settings.discord_messages.put,
-                    {
-                        "content": meow_say(text),
-                        "channel_id": channel_id,
-                        "message_id": message_id,
-                    },
+                discord.message_produce(
+                    text,
+                    request.app.state.sync_store.discord.messages,
+                    *json.loads(x_destination),
+                    logger=logger,
                 )
             )
 
         case _:
-            raise Exception("Invalid channel")
+            raise Exception("Invalid echo channel")

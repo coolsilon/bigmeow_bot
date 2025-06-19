@@ -1,0 +1,26 @@
+name: image builder dev
+run-name: Building new docker containers
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: set lower case owner name
+        env:
+          OWNER: "${{ github.repository_owner }}"
+        run: echo "OWNER_LC=${OWNER,,}" >> ${GITHUB_ENV}
+      - name: set image tag name
+        shell: bash
+        env:
+          BRANCH_NAME: "${{ github.head_ref || github.ref_name }}"
+        run: |
+          if [[ "${BRANCH_NAME,,}" == "main" || "${BRANCH_NAME,,}" == "master" ]]; then
+            echo "IMAGE_TAG=latest" >> ${GITHUB_ENV}
+          else
+            echo "IMAGE_TAG=${BRANCH_NAME,,}" >> ${GITHUB_ENV}
+          fi
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y podman
+      - run: echo ${{ secrets.GITHUB_TOKEN }} | podman login ghcr.io -u ${{ github.repository_owner }} --password-stdin
+      - run: podman build --tag "ghcr.io/$OWNER_LC/bigmeow_bot:$IMAGE_TAG" .
+      - run: podman push "ghcr.io/$OWNER_LC/bigmeow_bot:$IMAGE_TAG"

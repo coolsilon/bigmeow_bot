@@ -16,7 +16,7 @@ A dumb experimental bot done for no good reason
 * `!meowisblocked domain.tld`: Perform a query to https://blockedornot.sinarproject.org/ to check if a domain is blocked in Malaysia
 * `!meowprompt prompt`: a reply to the supplied prompt, powered by https://ifttt.com/
 * `!meowremind text @ when`: Set a reminder for yourself after the time specified
-* If your message has a `meow` in it, a cat photo is fetched from https://cataas.com/ (Currently not supported on slack)
+* If your message has a `meow` in it, a cat photo is fetched from https://cataas.com/
 
 NOTE: all `!` commands can be replaced by `/` in telegram, e.g. `/meowsay hello world`.
 
@@ -27,18 +27,24 @@ NOTE: all `!` commands can be replaced by `/` in telegram, e.g. `/meowsay hello 
 You can pull an image from https://hub.docker.com/r/jeffrey04/bigmeow_bot and supply the following environment variables to run the container.
 
 ```
-DISCORD_APP_ID=<DISCORD APP ID>
-DISCORD_APP_PUBLIC=<DISCORD APP PUBLIC KEY>
 DISCORD_TOKEN=<DISCORD TOKEN>
 DISCORD_USER=<OWNER DISCORD ID>
+
 TELEGRAM_TOKEN=<TELEGRAM TOKEN>
 TELEGRAM_USER=<OWNER TELEGRAM CHAT ID>
+TELEGRAM_WEB_TOKEN=<TOKEN FOR TELEGRAM WEBHOOK REQUEST>
+
+ECHO_TOKEN=<TOKEN FOR WEB ECHO REQUEST>
+
 WEBHOOK_URL=<URL TO WEBHOOK>
+
+WEB_SECRET_PING=<SECRET PING WEBHOOK TO FOR UPTIME CHECK>
+WEB_EECRET_PASSWORD=<TOKEN FOR SECRET PING WEBHOOK>
+
 DEBUG=<True IF RUNNING LOCALLY OTHERWISE False>
+
 IFTTT_KEY=<IFTTT_TOKEN>
-SLACK_SECRET_SIGN=<SLACK SIGNING SECRET>
-SLACK_SECRET_CLIENT=<SLACK CLIENT SECRET>
-SLACK_CLIENT_ID=<SLACK CLIENT ID>
+
 DATABASE_URL=postgresql+psycopg://<DATABASE_USER>:<DATABASE_PASSWORD>@<DATABASE_HOST>:<DATABASE_PORT>/<DATABASE_NAME>
 ```
 
@@ -58,9 +64,5 @@ $ poetry run python -m bigmeow.main
 
 Optionally, you can run the application with the following options:
 
-* `--noweb` to run without a web frontend
 * `--notg` to run without a telegram bot
 * `--nodiscord` to run without a discord bot
-* `--noslack` to run without a slack bot
-
-Notice slack and telegram bot would fail to receive event input without the web frontend
